@@ -1,0 +1,69 @@
+name: Build Android (aarch64)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-C link-arg=-Wl,-z,max-page-size=16384"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Setup Android NDK
+        run: |
+          NDK_VERSION=r27d
+          NDK_ZIP=android-ndk-${NDK_VERSION}-a.zip
+          wget -q https://dl.google.com/android/repository/${NDK_ZIP}
+          unzip -q ${NDK_ZIP} -d $HOME
+          echo "NDK_HOME=$HOME/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV
+          CLANG=$HOME/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${CLANG}" >> $GITHUB_ENV
+
+      - name: Build
+        run: |
+          cargo build --release \
+            --target aarch64-linux-android \
+            --no-default-features \
+            --features no-official-api,shuqi,tts-native,clipboard
+
+      - name: Strip binary and rename
+        run: |
+          STRIP=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip
+          BIN=target/aarch64-linux-android/release/tomato-novel-downloader
+          $STRIP $BIN
+          mkdir -p dist
+          # Rename to match self-update canonical name
+          ARTIFACT_NAME="UnifiedNovelDownloader-Android_arm64"
+          cp $BIN "dist/${ARTIFACT_NAME}"
+          # Generate SHA256 digest for hotfix verification
+          sha256sum "dist/${ARTIFACT_NAME}" | awk '{print "sha256:" $1}' > "dist/${ARTIFACT_NAME}.sha256"
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-novel-downloader-aarch64-android
+          path: |
+            dist/UnifiedNovelDownloader-Android_arm64
+            dist/UnifiedNovelDownloader-Android_arm64.sha256
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/UnifiedNovelDownloader-Android_arm64
+            dist/UnifiedNovelDownloader-Android_arm64.sha256
+          generate_release_notes: true
