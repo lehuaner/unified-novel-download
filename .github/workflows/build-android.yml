@@ -27,9 +27,13 @@ jobs:
           NDK_ZIP=android-ndk-${NDK_VERSION}-linux.zip
           wget -q https://dl.google.com/android/repository/${NDK_ZIP}
           unzip -q ${NDK_ZIP} -d $HOME
+          NDK_TOOLCHAIN=$HOME/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin
           echo "NDK_HOME=$HOME/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV
-          CLANG=$HOME/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang
+          CLANG=${NDK_TOOLCHAIN}/aarch64-linux-android24-clang
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=${CLANG}" >> $GITHUB_ENV
+          echo "CC_aarch64_linux_android=${CLANG}" >> $GITHUB_ENV
+          echo "CXX_aarch64_linux_android=${NDK_TOOLCHAIN}/aarch64-linux-android24-clang++" >> $GITHUB_ENV
+          echo "AR_aarch64_linux_android=${NDK_TOOLCHAIN}/llvm-ar" >> $GITHUB_ENV
 
       - name: Build
         run: |
