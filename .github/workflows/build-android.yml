@@ -24,7 +24,7 @@ jobs:
       - name: Setup Android NDK
         run: |
           NDK_VERSION=r27d
-          NDK_ZIP=android-ndk-${NDK_VERSION}-a.zip
+          NDK_ZIP=android-ndk-${NDK_VERSION}-linux.zip
           wget -q https://dl.google.com/android/repository/${NDK_ZIP}
           unzip -q ${NDK_ZIP} -d $HOME
           echo "NDK_HOME=$HOME/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV
