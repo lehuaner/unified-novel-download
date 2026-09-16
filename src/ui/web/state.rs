@@ -33,11 +33,44 @@ pub(crate) struct AppState {
     pub(crate) self_update: Arc<SelfUpdateStore>,
     pub(crate) library_scan: Arc<LibraryScanStore>,
     pub(crate) update_scan: Arc<UpdateScanStore>,
+    pub(crate) cover_cache: Arc<CoverThumbCache>,
     pub(crate) auth: Option<AuthState>,
     /// 限制同时访问上游 API（search / preview）的并发数，防止 WebUI 被用作多用户 API 代理。
     /// 仅在启用 official-api feature 时有意义，其他 feature 下置 None。
     #[cfg(feature = "official-api")]
     pub(crate) api_semaphore: Arc<tokio::sync::Semaphore>,
+}
+
+// ── 搜索结果封面缩略图内存缓存 ───────────────────────────────────
+
+const COVER_CACHE_MAX_ENTRIES: usize = 200;
+
+#[derive(Debug, Default)]
+pub(crate) struct CoverThumbCache {
+    inner: Mutex<HashMap<String, Arc<Vec<u8>>>>,
+}
+
+impl CoverThumbCache {
+    pub(crate) fn get(&self, key: &str) -> Option<Arc<Vec<u8>>> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+            .cloned()
+    }
+
+    pub(crate) fn put(&self, key: String, data: Vec<u8>) -> Arc<Vec<u8>> {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if g.len() >= COVER_CACHE_MAX_ENTRIES {
+            // 简单淘汰：删除最早插入的条目
+            if let Some(first_key) = g.keys().next().cloned() {
+                g.remove(&first_key);
+            }
+        }
+        let arc = Arc::new(data);
+        g.insert(key, arc.clone());
+        arc
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]

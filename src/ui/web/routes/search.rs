@@ -18,6 +18,8 @@ use crate::ui::web::state::AppState;
 #[derive(Debug, Deserialize)]
 pub(crate) struct SearchQuery {
     pub(crate) q: String,
+    /// 指定搜索源：`fanqie`、`shuqi`，留空表示全部。
+    pub(crate) provider: Option<String>,
 }
 
 pub(crate) async fn api_search(
@@ -31,11 +33,18 @@ pub(crate) async fn api_search(
             return Ok(Json(json!({"items": []})));
         }
 
+        let provider_filter = q.provider.as_deref().unwrap_or("").trim().to_lowercase();
+        let want_fanqie = provider_filter.is_empty() || provider_filter == "all" || provider_filter == "fanqie";
+        #[cfg(feature = "shuqi")]
+        let want_shuqi = provider_filter.is_empty() || provider_filter == "all" || provider_filter == "shuqi";
+        #[cfg(not(feature = "shuqi"))]
+        let _ = provider_filter;
+
         let mut all_items: Vec<Value> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
 
         // 番茄搜索（unidbg 签名 sidecar 模式）
-        {
+        if want_fanqie {
             let signer_url = _state.config_view.unidbg_signer_url.trim();
             if !signer_url.is_empty() {
                 let kw = keyword.to_string();
@@ -59,7 +68,7 @@ pub(crate) async fn api_search(
 
         // 书旗（Shuqi）搜索
         #[cfg(feature = "shuqi")]
-        {
+        if want_shuqi {
             let kw = keyword.to_string();
             match tokio::task::spawn_blocking(move || {
                 let client = crate::shuqi::ShuqiClient::new(15)?;
@@ -78,6 +87,18 @@ pub(crate) async fn api_search(
                 StatusCode::BAD_GATEWAY,
                 Json(json!({ "error": errors.join("; ") })),
             ));
+        }
+
+        // 为每个搜索结果提取封面 URL
+        for item in &mut all_items {
+            if let Some(raw) = item.get("raw") {
+                if let Some(obj) = raw.as_object() {
+                    let cover_url = crate::base_system::json_extract::pick_cover(obj);
+                    if let Some(url) = cover_url {
+                        item["cover_url"] = json!(url);
+                    }
+                }
+            }
         }
 
         let mut resp = json!({ "items": all_items });

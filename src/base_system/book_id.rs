@@ -7,10 +7,12 @@ static RE_URL: OnceLock<Regex> = OnceLock::new();
 static RE_QS: OnceLock<Regex> = OnceLock::new();
 static RE_PAGE: OnceLock<Regex> = OnceLock::new();
 static RE_SHORT_LINK: OnceLock<Regex> = OnceLock::new();
+static RE_ZLINK: OnceLock<Regex> = OnceLock::new();
 static HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
 
-/// Known domains that issue short-link share URLs of the form `/t/<token>`.
-/// The token is URL-safe and may contain `_` / `-` in addition to letters and digits.
+/// Known domains that issue short-link share URLs of the form `/t/<token>`
+/// or `/<token>` (zlink). The token is URL-safe and may contain `_` / `-`
+/// in addition to letters and digits.
 /// Only these hosts are followed during redirect resolution to prevent SSRF.
 const ALLOWED_SHORT_LINK_HOSTS: &[&str] = &[
     "changdunovel.com",
@@ -19,6 +21,7 @@ const ALLOWED_SHORT_LINK_HOSTS: &[&str] = &[
     "www.fanqienovel.com",
     "fqnovel.com",
     "www.fqnovel.com",
+    "zlink.fqnovel.com",
 ];
 
 fn re_url() -> &'static Regex {
@@ -37,6 +40,15 @@ fn re_short_link() -> &'static Regex {
     RE_SHORT_LINK.get_or_init(|| {
         Regex::new(r"(?i)^https?://[^/\s]+/t/[A-Za-z0-9_-]+/?(?:[?#][^\s]*)?$")
             .expect("compile RE_SHORT_LINK")
+    })
+}
+
+/// Matches zlink-style short URLs: `https://zlink.fqnovel.com/<token>`
+/// (path is just `/<token>` without the `/t/` prefix used by other hosts).
+fn re_zlink() -> &'static Regex {
+    RE_ZLINK.get_or_init(|| {
+        Regex::new(r"(?i)^https?://[^/\s]+/[A-Za-z0-9_-]+/?(?:[?#][^\s]*)?$")
+            .expect("compile RE_ZLINK")
     })
 }
 
@@ -95,19 +107,30 @@ pub fn parse_book_id(input: &str) -> Option<String> {
 }
 
 /// Returns `true` if `input` contains a short-redirect share link from a
-/// known allowed domain (e.g. `https://changdunovel.com/t/E_HDbOHpMJA/`).
+/// known allowed domain (e.g. `https://changdunovel.com/t/E_HDbOHpMJA/`
+/// or `https://zlink.fqnovel.com/dhVGe`).
 pub fn is_short_link(input: &str) -> bool {
     let trimmed = input.trim();
     let target = re_url()
         .find(trimmed)
         .map(|m| m.as_str())
         .unwrap_or(trimmed);
-    if !re_short_link().is_match(target) {
+    let host = match url_host(target) {
+        Some(h) => h,
+        None => return false,
+    };
+    if !ALLOWED_SHORT_LINK_HOSTS.contains(&host.as_str()) {
         return false;
     }
-    url_host(target)
-        .map(|h| ALLOWED_SHORT_LINK_HOSTS.contains(&h.as_str()))
-        .unwrap_or(false)
+    // Standard short link: /t/<token>
+    if re_short_link().is_match(target) {
+        return true;
+    }
+    // zlink-style short link: /<token> (only for zlink.fqnovel.com)
+    if host == "zlink.fqnovel.com" && re_zlink().is_match(target) {
+        return true;
+    }
+    false
 }
 
 /// Like [`parse_book_id`], but also handles short-redirect share links by
@@ -164,6 +187,13 @@ mod tests {
     }
 
     #[test]
+    fn parse_book_id_from_full_share_link_with_encoded_params() {
+        // Real-world share URL with URL-encoded parameters (encrypt_did, zlink, etc.)
+        let url = "https://changdunovel.com/ug/pages/book-share?share_type=11&aid=1967&book_id=7612464554961800216&encrypt_did=MDIEDNvz53FgTSz0b4iFggQQTfts0%2BVFRTP1m3%2BV2oelgQQQktgNmnytAcSL4HnxpajjRQ%3D%3D&ver=v2&share_genre=read&user_id=d232ab2c3b5d29e7bc819a6063c5d4d2&did=e219c3c6f9f1f6563ef9342091f1dd04&entrance=&zlink=https%3A%2F%2Fzlink.fqnovel.com%2FdhVGe&gd_label=click_schema_lhft_share_novelapp_android";
+        assert_eq!(parse_book_id(url), Some("7612464554961800216".into()));
+    }
+
+    #[test]
     fn recognize_short_link_with_underscore_token() {
         assert!(is_short_link("https://changdunovel.com/t/E_HDbOHpMJA/"));
     }
@@ -171,6 +201,17 @@ mod tests {
     #[test]
     fn recognize_short_link_with_dash_token() {
         assert!(is_short_link("https://changdunovel.com/t/AbC-Def_123/"));
+    }
+
+    #[test]
+    fn recognize_zlink_short_link() {
+        assert!(is_short_link("https://zlink.fqnovel.com/dhVGe"));
+    }
+
+    #[test]
+    fn reject_zlink_style_from_non_zlink_host() {
+        // /<token> without /t/ prefix is only valid for zlink.fqnovel.com
+        assert!(!is_short_link("https://fanqienovel.com/dhVGe"));
     }
 
     #[test]

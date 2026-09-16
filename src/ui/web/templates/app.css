@@ -788,6 +788,35 @@ button.success {
   width: 90px;
 }
 
+.col-cover {
+  width: 56px;
+  text-align: center;
+}
+
+.search-cover-thumb {
+  width: 40px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #f0f0f0;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ccc;
+  border-top-color: var(--accent, #4a90d9);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .col-action-md {
   width: 120px;
 }

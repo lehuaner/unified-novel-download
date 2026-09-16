@@ -72,7 +72,9 @@ fn sniff_mime_ext(bytes: &[u8]) -> (&'static str, &'static str) {
 
 // ── JPEG 转码 ───────────────────────────────────────────────────
 
-fn try_convert_to_jpeg(bytes: &[u8], quality: u8, max_dim: u32) -> Option<Vec<u8>> {
+/// Convert an image to JPEG with optional resizing.
+/// Returns `None` if the input cannot be decoded.
+pub fn try_convert_to_jpeg(bytes: &[u8], quality: u8, max_dim: u32) -> Option<Vec<u8>> {
     let mut img = image::load_from_memory(bytes).ok()?;
 
     if max_dim > 0 {

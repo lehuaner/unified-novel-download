@@ -115,6 +115,7 @@ fn join_params(params: &[(String, String)]) -> String {
 }
 
 /// 简单 URL 编码（与 Java URLEncoder.encode 一致，空格→+）。
+#[allow(dead_code)]
 fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
@@ -291,6 +292,7 @@ impl FqApiClient {
     }
 
     /// 健康检查（signer 可达）。
+    #[allow(dead_code)]
     pub(crate) fn health(&self) -> Result<bool> {
         self.signer.health()
     }

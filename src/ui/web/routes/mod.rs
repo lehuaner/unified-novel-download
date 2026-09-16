@@ -7,5 +7,6 @@ pub(crate) mod jobs;
 pub(crate) mod library;
 pub(crate) mod preview;
 pub(crate) mod search;
+pub(crate) mod search_cover;
 pub(crate) mod status;
 pub(crate) mod updates;

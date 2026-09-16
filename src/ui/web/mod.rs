@@ -143,6 +143,7 @@ async fn run_async(
         self_update: Arc::new(state::SelfUpdateStore::default()),
         library_scan: Arc::new(LibraryScanStore::default()),
         update_scan: Arc::new(state::UpdateScanStore::default()),
+        cover_cache: Arc::new(state::CoverThumbCache::default()),
         auth,
         // 最多允许 2 个并发的上游 API 请求（search / preview），
         // 单用户正常使用完全够用，SaaS 滥用场景下无法并发服务多用户。

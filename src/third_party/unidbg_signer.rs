@@ -106,6 +106,7 @@ impl UnidbgSigner {
     }
 
     /// 健康检查。
+    #[allow(dead_code)]
     pub(crate) fn health(&self) -> Result<bool> {
         let endpoint = format!("{}/api/fq-signature/health", self.base_url);
         let resp = self.client.get(&endpoint).send()?;

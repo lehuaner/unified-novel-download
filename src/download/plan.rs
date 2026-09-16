@@ -442,7 +442,7 @@ pub(crate) fn apply_range(chapters: &[ChapterRef], range: Option<ChapterRange>) 
 // ── 封面下载（仅从 web 页面抓取）────────────────────────────────
 
 /// 从番茄小说 web 页面抓取封面图片并保存到目标目录。
-/// 不再使用 API 提供的 cover_url（该路径不稳定，容易间歇性丢失）。
+/// 优先使用 web 页面抓取的封面（稳定），失败时回退到 API 提供的 cover_url。
 fn download_web_cover(
     config: &Config,
     book_id: &str,
@@ -460,75 +460,99 @@ fn download_web_cover(
     let _ = std::fs::create_dir_all(cover_dir);
 
     // 从 web 页面获取 html_img_cover_url
-    let web_cfg = FanqieWebConfig {
-        request_timeout: Duration::from_secs(config.request_timeout.max(1)),
-        max_retries: 2,
-        ..Default::default()
-    };
-    let web = match FanqieWebNetwork::new(web_cfg) {
-        Ok(w) => w,
-        Err(e) => {
-            warn!(target: "download", book_id, error = %e, "初始化 FanqieWebNetwork 失败，跳过封面下载");
-            return;
+    let web_cover_url = {
+        let web_cfg = FanqieWebConfig {
+            request_timeout: Duration::from_secs(config.request_timeout.max(1)),
+            max_retries: 2,
+            ..Default::default()
+        };
+        match FanqieWebNetwork::new(web_cfg) {
+            Ok(w) => {
+                let (_, _, _, _, _, _, html_img_cover_url, _, _) = w.get_book_info(book_id);
+                html_img_cover_url
+            }
+            Err(e) => {
+                warn!(target: "download", book_id, error = %e, "初始化 FanqieWebNetwork 失败，将尝试 API cover_url 回退");
+                None
+            }
         }
     };
-    let (_, _, _, _, _, _, html_img_cover_url, _, _) = web.get_book_info(book_id);
-    let img_url = match html_img_cover_url {
-        Some(ref u) if !u.trim().is_empty() => u.as_str(),
-        _ => {
-            warn!(target: "download", book_id, "web 页面未提取到封面 URL，跳过封面下载");
-            return;
-        }
-    };
+
+    // 候选封面 URL 列表：web 页面优先，API cover_url 作为回退
+    let candidates: Vec<&str> = [
+        web_cover_url.as_deref(),
+        meta.detail_cover_url.as_deref(),
+        meta.cover_url.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|s| !s.trim().is_empty())
+    .collect();
+
+    if candidates.is_empty() {
+        warn!(target: "download", book_id, "无可用封面 URL，跳过封面下载");
+        return;
+    }
 
     let timeout = Duration::from_millis(10_000);
     let max_retries = 3u32;
 
-    for attempt in 0..max_retries {
-        if attempt > 0 {
-            let base_ms = 300u64 * (1u64 << attempt.min(3));
-            std::thread::sleep(Duration::from_millis(base_ms));
-        }
-
-        let bytes = match crate::third_party::media_fetch::fetch_bytes(img_url, timeout) {
-            Some(b) if !b.is_empty() => b,
-            _ => {
-                warn!(
-                    target: "download",
-                    book_id,
-                    url = img_url,
-                    attempt = attempt + 1,
-                    max_retries,
-                    "web 封面下载失败，重试中"
-                );
-                continue;
+    for img_url in &candidates {
+        for attempt in 0..max_retries {
+            if attempt > 0 {
+                let base_ms = 300u64 * (1u64 << attempt.min(3));
+                std::thread::sleep(Duration::from_millis(base_ms));
             }
-        };
 
-        // 跳过 HEIC（EPUB 不支持）
-        if bytes.len() >= 12
-            && &bytes[4..8] == b"ftyp"
-            && matches!(&bytes[8..12], b"heic" | b"heix" | b"mif1" | b"msf1")
-        {
-            warn!(target: "download", book_id, "web 封面为 HEIC 格式，EPUB 不支持，跳过");
-            return;
-        }
+            let bytes = match crate::third_party::media_fetch::fetch_bytes(img_url, timeout) {
+                Some(b) if !b.is_empty() => b,
+                _ => {
+                    warn!(
+                        target: "download",
+                        book_id,
+                        url = img_url,
+                        attempt = attempt + 1,
+                        max_retries,
+                        "封面下载失败，重试中"
+                    );
+                    continue;
+                }
+            };
 
-        // 根据 magic bytes 嗅探格式
-        let ext = if bytes.len() >= 8 && bytes[0] == 0x89 && &bytes[1..4] == b"PNG" {
-            "png"
-        } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-            "webp"
-        } else {
-            "jpg"
-        };
+            // 跳过 HEIC（EPUB 不支持）
+            if bytes.len() >= 12
+                && &bytes[4..8] == b"ftyp"
+                && matches!(&bytes[8..12], b"heic" | b"heix" | b"mif1" | b"msf1")
+            {
+                warn!(target: "download", book_id, "封面为 HEIC 格式，EPUB 不支持，尝试下一个候选 URL");
+                break; // try next candidate URL
+            }
 
-        let path = book_paths::canonical_cover_path(cover_dir, ext);
-        if std::fs::write(&path, &bytes).is_ok() {
-            info!(target: "download", book_id, path = %path.display(), "web 封面下载成功");
-            return;
+            // WebP → JPEG 转换（EPUB 阅读器对 WebP 支持不佳）
+            let (save_bytes, ext) = if bytes.len() >= 12
+                && &bytes[0..4] == b"RIFF"
+                && &bytes[8..12] == b"WEBP"
+            {
+                match crate::book_parser::image_utils::try_convert_to_jpeg(&bytes, 85, 0) {
+                    Some(jpeg) => (jpeg, "jpg"),
+                    None => {
+                        warn!(target: "download", book_id, "WebP 封面转 JPEG 失败，保存原始 WebP");
+                        (bytes, "webp")
+                    }
+                }
+            } else if bytes.len() >= 8 && bytes[0] == 0x89 && &bytes[1..4] == b"PNG" {
+                (bytes, "png")
+            } else {
+                (bytes, "jpg")
+            };
+
+            let path = book_paths::canonical_cover_path(cover_dir, ext);
+            if std::fs::write(&path, &save_bytes).is_ok() {
+                info!(target: "download", book_id, path = %path.display(), "封面下载成功");
+                return;
+            }
         }
     }
 
-    warn!(target: "download", book_id, "web 封面下载失败（已重试 {} 次）", max_retries);
+    warn!(target: "download", book_id, "所有候选封面 URL 下载失败");
 }

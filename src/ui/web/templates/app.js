@@ -211,18 +211,26 @@ function parseBookId(input) {
   const page = target.match(/\/page\/([0-9]+)/i);
   if (page && page[1]) return page[1];
 
-  // Short link (e.g. https://changdunovel.com/t/E_HDbOHpMJA/) – return the URL so
-  // the server can follow the redirect and extract the book ID.
+  // Short link (e.g. https://changdunovel.com/t/E_HDbOHpMJA/ or
+  // https://zlink.fqnovel.com/dhVGe) – return the URL so the server can
+  // follow the redirect and extract the book ID.
   // Restrict to known share-link hosts to prevent forwarding arbitrary URLs.
-  const allowedShortLinkHosts = new Set(['changdunovel.com', 'www.changdunovel.com', 'fanqienovel.com', 'www.fanqienovel.com', 'fqnovel.com', 'www.fqnovel.com']);
+  const allowedShortLinkHosts = new Set(['changdunovel.com', 'www.changdunovel.com', 'fanqienovel.com', 'www.fanqienovel.com', 'fqnovel.com', 'www.fqnovel.com', 'zlink.fqnovel.com']);
   try {
     const parsed = new URL(target);
     if (
       (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-      allowedShortLinkHosts.has(parsed.hostname.toLowerCase()) &&
-      /^\/t\/[A-Za-z0-9_-]+\/?$/.test(parsed.pathname)
+      allowedShortLinkHosts.has(parsed.hostname.toLowerCase())
     ) {
-      return target;
+      // Standard short link: /t/<token>
+      if (/^\/t\/[A-Za-z0-9_-]+\/?$/.test(parsed.pathname)) {
+        return target;
+      }
+      // zlink-style short link: /<token> (only for zlink.fqnovel.com)
+      if (parsed.hostname.toLowerCase() === 'zlink.fqnovel.com' &&
+          /^\/[A-Za-z0-9_-]+\/?$/.test(parsed.pathname)) {
+        return target;
+      }
     }
   } catch (_) {
     // Not a valid absolute URL; ignore and fall through.
@@ -867,23 +875,71 @@ async function doSearch(q) {
   const out = document.getElementById('searchResults');
   out.innerHTML = '';
   if (!q) return;
-  const data = await j(`/api/search?q=${encodeURIComponent(q)}`);
-  const items = data.items || [];
-  if (items.length === 0) {
-    out.innerHTML = '<tr class="empty-row"><td colspan="5">无结果</td></tr>';
+
+  // 进度显示
+  const progressEl = document.getElementById('searchProgress');
+  const progressText = document.getElementById('searchProgressText');
+  const showProgress = (text) => {
+    if (progressEl) progressEl.classList.remove('hidden');
+    if (progressText) progressText.textContent = text;
+  };
+  const hideProgress = () => {
+    if (progressEl) progressEl.classList.add('hidden');
+  };
+
+  // 搜索源列表
+  const providers = [
+    { name: 'fanqie', label: '番茄' },
+    { name: 'shuqi', label: '书旗' },
+  ];
+  const totalProviders = providers.length;
+  let completedProviders = 0;
+  let allItems = [];
+
+  showProgress(`搜索中... 已完成 0/${totalProviders} 个源`);
+
+  // 并发请求各搜索源
+  const promises = providers.map(async (p) => {
+    try {
+      const data = await j(`/api/search?q=${encodeURIComponent(q)}&provider=${p.name}`);
+      const items = data.items || [];
+      completedProviders++;
+      showProgress(`搜索中... 已完成 ${completedProviders}/${totalProviders} 个源（${p.label} ${items.length} 条）`);
+      return items;
+    } catch (err) {
+      completedProviders++;
+      showProgress(`搜索中... 已完成 ${completedProviders}/${totalProviders} 个源（${p.label} 失败）`);
+      return [];
+    }
+  });
+
+  const results = await Promise.all(promises);
+  for (const items of results) {
+    allItems = allItems.concat(items);
+  }
+
+  hideProgress();
+
+  if (allItems.length === 0) {
+    out.innerHTML = '<tr class="empty-row"><td colspan="6">无结果</td></tr>';
     return;
   }
-  for (const b of items) {
+  for (const b of allItems) {
     const isShuqi = String(b.book_id ?? '').startsWith('sq:');
     const sourceLabel = isShuqi ? '书旗' : '番茄';
     const sourceClass = isShuqi ? 'tag tag-blue' : 'tag tag-green';
+    const coverUrl = b.cover_url ?? '';
+    const coverHtml = coverUrl
+      ? `<img class="search-cover-thumb" src="/api/search-cover?url=${encodeURIComponent(coverUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      : '';
     const tr = document.createElement('tr');
     tr.innerHTML = `
+      <td class="col-cover">${coverHtml}</td>
       <td>${esc(b.title ?? '')}</td>
       <td>${esc(b.author ?? '')}</td>
       <td><span class="${sourceClass}">${sourceLabel}</span></td>
       <td><code>${esc(b.book_id)}</code></td>
-      <td><button data-bookid="${esc(b.book_id)}" data-cover="${esc(b.cover_url ?? '')}" class="startDownload sm primary">下载</button></td>
+      <td><button data-bookid="${esc(b.book_id)}" data-cover="${esc(coverUrl)}" class="startDownload sm primary">下载</button></td>
     `;
     out.appendChild(tr);
   }
@@ -1552,7 +1608,7 @@ function wire() {
           await startDownload(bookId);
           if (hint) hint.textContent = `已创建下载任务：${bookId}`;
           const out = document.getElementById('searchResults');
-          if (out) out.innerHTML = '<tr class="empty-row"><td colspan="4">已加入任务队列，可在"任务"页查看进度</td></tr>';
+          if (out) out.innerHTML = '<tr class="empty-row"><td colspan="6">已加入任务队列，可在"任务"页查看进度</td></tr>';
         } catch (err) {
           if (hint) hint.textContent = '创建任务失败';
           alert(err);
