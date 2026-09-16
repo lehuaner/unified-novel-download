@@ -391,17 +391,16 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android NDK
         shell: bash
         run: |
           set -euo pipefail
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           set +o pipefail
-          yes | sdkmanager --licenses >/dev/null
+          yes | "$SDKMANAGER" --licenses >/dev/null
           set -o pipefail
-          sdkmanager "ndk;26.1.10909125"
+          "$SDKMANAGER" "ndk;26.1.10909125"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
 
       - name: Configure Android linker
@@ -497,17 +496,16 @@ jobs:
         with:
           targets: armv7-linux-androideabi
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android NDK
         shell: bash
         run: |
           set -euo pipefail
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           set +o pipefail
-          yes | sdkmanager --licenses >/dev/null
+          yes | "$SDKMANAGER" --licenses >/dev/null
           set -o pipefail
-          sdkmanager "ndk;26.1.10909125"
+          "$SDKMANAGER" "ndk;26.1.10909125"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
 
       - name: Configure Android linker
