@@ -88,7 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-Linux_amd64-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-Linux_amd64-${GITHUB_REF_NAME}"
           cp target/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -175,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-Linux_musl_amd64-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-Linux_musl_amd64-${GITHUB_REF_NAME}"
           cp target/x86_64-unknown-linux-musl/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -262,7 +262,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-Linux_musl_arm64-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-Linux_musl_arm64-${GITHUB_REF_NAME}"
           cp target/aarch64-unknown-linux-musl/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -340,7 +340,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-Linux_arm64-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-Linux_arm64-${GITHUB_REF_NAME}"
           cp target/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -445,7 +445,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-Android_arm64-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-Android_arm64-${GITHUB_REF_NAME}"
           cp target/aarch64-linux-android/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -550,7 +550,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-Android_arm32-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-Android_arm32-${GITHUB_REF_NAME}"
           cp target/armv7-linux-androideabi/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -628,7 +628,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-Win64-${GITHUB_REF_NAME}.exe"
+          out="UnifiedNovelDownloader-Win64-${GITHUB_REF_NAME}.exe"
           cp target/release/tomato-novel-downloader.exe "dist/${out}"
 
       - name: Upload artifact
@@ -706,7 +706,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-WinArm64-${GITHUB_REF_NAME}.exe"
+          out="UnifiedNovelDownloader-WinArm64-${GITHUB_REF_NAME}.exe"
           cp target/release/tomato-novel-downloader.exe "dist/${out}"
 
       - name: Upload artifact
@@ -784,7 +784,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-macOS_arm64-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-macOS_arm64-${GITHUB_REF_NAME}"
           cp target/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -864,7 +864,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          out="TomatoNovelDownloader-macOS_amd64-${GITHUB_REF_NAME}"
+          out="UnifiedNovelDownloader-macOS_amd64-${GITHUB_REF_NAME}"
           cp target/x86_64-apple-darwin/release/tomato-novel-downloader "dist/${out}"
 
       - name: Upload artifact
@@ -974,19 +974,19 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Tomato Novel Downloader ${{ github.ref_name }}
+          name: Unified Novel Downloader ${{ github.ref_name }}
           body: ${{ steps.generate_notes.outputs.result }}
           files: |
-            release-artifacts/linux-build/TomatoNovelDownloader-Linux_amd64-*
-            release-artifacts/linux-musl-build/TomatoNovelDownloader-Linux_musl_amd64-*
-            release-artifacts/linux-musl-arm64-build/TomatoNovelDownloader-Linux_musl_arm64-*
-            release-artifacts/linux-arm64-build/TomatoNovelDownloader-Linux_arm64-*
-            release-artifacts/android-arm64-build/TomatoNovelDownloader-Android_arm64-*
-            release-artifacts/android-arm32-build/TomatoNovelDownloader-Android_arm32-*
-            release-artifacts/windows-build/TomatoNovelDownloader-Win64-*.exe
-            release-artifacts/windows-arm64-build/TomatoNovelDownloader-WinArm64-*.exe
-            release-artifacts/macos-build/TomatoNovelDownloader-macOS_arm64-*
-            release-artifacts/macos-amd64-build/TomatoNovelDownloader-macOS_amd64-*
+            release-artifacts/linux-build/UnifiedNovelDownloader-Linux_amd64-*
+            release-artifacts/linux-musl-build/UnifiedNovelDownloader-Linux_musl_amd64-*
+            release-artifacts/linux-musl-arm64-build/UnifiedNovelDownloader-Linux_musl_arm64-*
+            release-artifacts/linux-arm64-build/UnifiedNovelDownloader-Linux_arm64-*
+            release-artifacts/android-arm64-build/UnifiedNovelDownloader-Android_arm64-*
+            release-artifacts/android-arm32-build/UnifiedNovelDownloader-Android_arm32-*
+            release-artifacts/windows-build/UnifiedNovelDownloader-Win64-*.exe
+            release-artifacts/windows-arm64-build/UnifiedNovelDownloader-WinArm64-*.exe
+            release-artifacts/macos-build/UnifiedNovelDownloader-macOS_arm64-*
+            release-artifacts/macos-amd64-build/UnifiedNovelDownloader-macOS_amd64-*
 
   docker-webui-glibc:
     name: Build & Push WebUI Docker Image (glibc)
@@ -1027,7 +1027,7 @@ jobs:
         id: meta_glibc
         uses: docker/metadata-action@v5
         with:
-          images: zhongbai233/tomato-novel-downloader-webui
+          images: ${{ github.repository_owner }}/unified-novel-download-webui
           tags: |
             type=ref,event=tag,suffix=-glibc
             type=raw,value=latest
@@ -1082,7 +1082,7 @@ jobs:
         id: meta_musl
         uses: docker/metadata-action@v5
         with:
-          images: zhongbai233/tomato-novel-downloader-webui
+          images: ${{ github.repository_owner }}/unified-novel-download-webui
           tags: |
             type=ref,event=tag,suffix=-musl
             type=raw,value=latest-musl
