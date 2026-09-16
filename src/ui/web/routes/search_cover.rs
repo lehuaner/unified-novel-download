@@ -52,12 +52,19 @@ pub(crate) async fn api_search_cover(
     }
 
     // 压缩为 JPEG 缩略图（max 120px 宽，quality 70）
-    let thumb = crate::book_parser::image_utils::try_convert_to_jpeg(&bytes, 70, 120)
-        .ok_or(StatusCode::UNSUPPORTED_MEDIA_TYPE)?;
+    let thumb = crate::book_parser::image_utils::try_convert_to_jpeg(&bytes, 70, 120);
 
-    // 存入内存缓存并返回
-    let cached = state.cover_cache.put(cache_key, thumb);
-    Ok(build_jpeg_response(&cached))
+    match thumb {
+        Some(thumb) => {
+            // 存入内存缓存并返回
+            let cached = state.cover_cache.put(cache_key, thumb);
+            Ok(build_jpeg_response(&cached))
+        }
+        None => {
+            // 无法解码（如 HEIC/AVIF），302 重定向到原始 URL，让浏览器直接处理
+            Ok(build_redirect_response(url))
+        }
+    }
 }
 
 fn build_jpeg_response(data: &[u8]) -> Response {
@@ -65,6 +72,20 @@ fn build_jpeg_response(data: &[u8]) -> Response {
     *resp.status_mut() = StatusCode::OK;
     resp.headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    resp
+}
+
+/// 对无法服务端转换的格式（HEIC/AVIF），302 重定向到原始 URL。
+fn build_redirect_response(url: &str) -> Response {
+    let mut resp = Response::new(Body::empty());
+    *resp.status_mut() = StatusCode::FOUND;
+    if let Ok(val) = HeaderValue::from_str(url) {
+        resp.headers_mut().insert(header::LOCATION, val);
+    }
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=86400"),
