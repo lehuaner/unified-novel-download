@@ -6,6 +6,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-C link-arg=-Wl,-z,max-page-size=16384"
