@@ -1,0 +1,35 @@
+# Rust
+/target
+debug/
+*.pdb
+**/*.rs.bk
+
+# Runtime data
+/logs
+/config.yml
+/.tnd_update_cache.json
+/novels
+/shuqi_data
+
+# IDE
+/.idea
+/.vscode/settings.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temp/build artifacts
+*.log
+*.tmp
+check-result*.txt
+cargo_check_*.log
+*.zip
+
+# Personal deployment scripts (contains local paths/passwords)
+/deploy
+/build-android.ps1
+
+# Personal deployment scripts (contains local paths/passwords)
+/deploy
+/build-android.ps1
