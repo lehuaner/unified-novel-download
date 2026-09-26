@@ -43,7 +43,7 @@ jobs:
           cargo build --release \
             --target aarch64-linux-android \
             --no-default-features \
-            --features no-official-api,shuqi,tts-native,clipboard
+            --features no-official-api,shuqi,qimao,tts-native,clipboard
 
       - name: Strip binary and rename
         run: |

@@ -78,9 +78,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --features shuqi
+            cargo build --release --features shuqi,qimao
           else
-            cargo build --release --no-default-features --features no-official-api,shuqi,tts,clipboard,clipboard-arboard
+            cargo build --release --no-default-features --features no-official-api,shuqi,qimao,tts,clipboard,clipboard-arboard
           fi
 
       - name: Bundle artifacts
@@ -165,9 +165,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features official-api,shuqi,tts-native,clipboard
+            cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features official-api,shuqi,qimao,tts-native,clipboard
           else
-            cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features no-official-api,shuqi,tts-native,clipboard
+            cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features no-official-api,shuqi,qimao,tts-native,clipboard
           fi
 
       - name: Bundle artifacts
@@ -252,9 +252,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --target aarch64-unknown-linux-musl --no-default-features --features official-api,shuqi,tts-native,clipboard
+            cargo build --release --target aarch64-unknown-linux-musl --no-default-features --features official-api,shuqi,qimao,tts-native,clipboard
           else
-            cargo build --release --target aarch64-unknown-linux-musl --no-default-features --features no-official-api,shuqi,tts-native,clipboard
+            cargo build --release --target aarch64-unknown-linux-musl --no-default-features --features no-official-api,shuqi,qimao,tts-native,clipboard
           fi
 
       - name: Bundle artifacts
@@ -330,9 +330,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --features shuqi
+            cargo build --release --features shuqi,qimao
           else
-            cargo build --release --no-default-features --features no-official-api,shuqi,tts,clipboard,clipboard-arboard
+            cargo build --release --no-default-features --features no-official-api,shuqi,qimao,tts,clipboard,clipboard-arboard
           fi
 
       - name: Bundle artifacts
@@ -435,9 +435,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --target aarch64-linux-android --no-default-features --features official-api,shuqi,tts-native,clipboard
+            cargo build --release --target aarch64-linux-android --no-default-features --features official-api,shuqi,qimao,tts-native,clipboard
           else
-            cargo build --release --target aarch64-linux-android --no-default-features --features no-official-api,shuqi,tts-native,clipboard
+            cargo build --release --target aarch64-linux-android --no-default-features --features no-official-api,shuqi,qimao,tts-native,clipboard
           fi
 
       - name: Bundle artifacts
@@ -540,9 +540,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --target armv7-linux-androideabi --no-default-features --features official-api,shuqi,tts-native,clipboard
+            cargo build --release --target armv7-linux-androideabi --no-default-features --features official-api,shuqi,qimao,tts-native,clipboard
           else
-            cargo build --release --target armv7-linux-androideabi --no-default-features --features no-official-api,shuqi,tts-native,clipboard
+            cargo build --release --target armv7-linux-androideabi --no-default-features --features no-official-api,shuqi,qimao,tts-native,clipboard
           fi
 
       - name: Bundle artifacts
@@ -618,9 +618,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --features shuqi
+            cargo build --release --features shuqi,qimao
           else
-            cargo build --release --no-default-features --features no-official-api,shuqi,tts,clipboard,clipboard-arboard
+            cargo build --release --no-default-features --features no-official-api,shuqi,qimao,tts,clipboard,clipboard-arboard
           fi
 
       - name: Bundle artifacts
@@ -696,9 +696,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --features shuqi
+            cargo build --release --features shuqi,qimao
           else
-            cargo build --release --no-default-features --features no-official-api,shuqi,tts,clipboard,clipboard-arboard
+            cargo build --release --no-default-features --features no-official-api,shuqi,qimao,tts,clipboard,clipboard-arboard
           fi
 
       - name: Bundle artifacts
@@ -774,9 +774,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --features shuqi
+            cargo build --release --features shuqi,qimao
           else
-            cargo build --release --no-default-features --features no-official-api,shuqi,tts,clipboard,clipboard-arboard
+            cargo build --release --no-default-features --features no-official-api,shuqi,qimao,tts,clipboard,clipboard-arboard
           fi
 
       - name: Bundle artifacts
@@ -854,9 +854,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "$GITHUB_WORKSPACE/../Tomato-Novel-Official-API" ]; then
-            cargo build --release --target x86_64-apple-darwin --no-default-features --features official-api,shuqi,tts-native,clipboard,clipboard-arboard
+            cargo build --release --target x86_64-apple-darwin --no-default-features --features official-api,shuqi,qimao,tts-native,clipboard,clipboard-arboard
           else
-            cargo build --release --target x86_64-apple-darwin --no-default-features --features no-official-api,shuqi,tts-native,clipboard,clipboard-arboard
+            cargo build --release --target x86_64-apple-darwin --no-default-features --features no-official-api,shuqi,qimao,tts-native,clipboard,clipboard-arboard
           fi
 
       - name: Bundle artifacts
