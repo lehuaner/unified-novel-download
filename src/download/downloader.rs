@@ -749,6 +749,21 @@ pub(crate) fn download_chapters_into_manager(
         );
     }
 
+    // 七猫（Qimao）路由：整本缓存 ZIP 下载，跳过番茄段评逻辑。
+    #[cfg(feature = "qimao")]
+    if crate::qimao::is_qimao_book_id(book_id) {
+        return crate::qimao::download_qimao_into_manager(
+            config,
+            book_id,
+            book_name,
+            manager,
+            chosen_chapters,
+            pending_chapters,
+            reporter,
+            cancel,
+        );
+    }
+
     // 初始化段评进度：以磁盘缓存为准，避免断点续传时"假满"。
     if segment_enabled(config) && reporter.snapshot.comment_total > 0 {
         let seg_dir = manager.book_folder().join("segment_comments");

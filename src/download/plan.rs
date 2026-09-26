@@ -43,6 +43,12 @@ pub fn prepare_download_plan(
         return crate::shuqi::prepare_shuqi_plan(config, book_id, meta_hint);
     }
 
+    // 七猫（Qimao）路由
+    #[cfg(feature = "qimao")]
+    if crate::qimao::is_qimao_book_id(book_id) {
+        return crate::qimao::prepare_qimao_plan(config, book_id, meta_hint);
+    }
+
     let directory = DirectoryClient::new().context("init DirectoryClient")?;
     let (dir_url, _content_urls) = resolve_api_urls(config)?;
     let api_url = dir_url.as_deref();
@@ -67,7 +73,19 @@ pub fn prepare_download_plan(
             #[cfg(feature = "shuqi")]
             if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
                 let shuqi_id = format!("sq:{book_id}");
-                if let Ok(plan) = crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint) {
+                if let Ok(plan) =
+                    crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint.clone())
+                {
+                    return Ok(plan);
+                }
+            }
+            // 纯数字 book_id 可能是七猫 ID，尝试七猫回退
+            #[cfg(feature = "qimao")]
+            if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
+                let qimao_id = format!("qm:{book_id}");
+                if let Ok(plan) =
+                    crate::qimao::prepare_qimao_plan(config, &qimao_id, meta_hint.clone())
+                {
                     return Ok(plan);
                 }
             }
@@ -88,7 +106,17 @@ pub fn prepare_download_plan(
         #[cfg(feature = "shuqi")]
         if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
             let shuqi_id = format!("sq:{book_id}");
-            if let Ok(plan) = crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint) {
+            if let Ok(plan) = crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint.clone()) {
+                return Ok(plan);
+            }
+        }
+        // 纯数字 book_id 可能是七猫 ID，尝试七猫回退
+        #[cfg(feature = "qimao")]
+        if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
+            let qimao_id = format!("qm:{book_id}");
+            if let Ok(plan) =
+                crate::qimao::prepare_qimao_plan(config, &qimao_id, meta_hint.clone())
+            {
                 return Ok(plan);
             }
         }
@@ -157,6 +185,12 @@ pub fn prepare_download_plan(
         return crate::shuqi::prepare_shuqi_plan(config, book_id, meta_hint);
     }
 
+    // 七猫（Qimao）路由
+    #[cfg(feature = "qimao")]
+    if crate::qimao::is_qimao_book_id(book_id) {
+        return crate::qimao::prepare_qimao_plan(config, book_id, meta_hint);
+    }
+
     match prepare_download_plan_web(config, book_id, meta_hint.clone()) {
         Ok(plan) => Ok(plan),
         Err(web_err) => {
@@ -164,7 +198,19 @@ pub fn prepare_download_plan(
             #[cfg(feature = "shuqi")]
             if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
                 let shuqi_id = format!("sq:{book_id}");
-                if let Ok(plan) = crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint) {
+                if let Ok(plan) =
+                    crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint.clone())
+                {
+                    return Ok(plan);
+                }
+            }
+            // 纯数字 book_id 可能是七猫 ID，尝试七猫回退
+            #[cfg(feature = "qimao")]
+            if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
+                let qimao_id = format!("qm:{book_id}");
+                if let Ok(plan) =
+                    crate::qimao::prepare_qimao_plan(config, &qimao_id, meta_hint.clone())
+                {
                     return Ok(plan);
                 }
             }

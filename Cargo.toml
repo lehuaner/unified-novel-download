@@ -37,6 +37,9 @@ docker = []
 # 书旗（Shuqi）小说提供商：通过 `sq:<bookId>` 前缀路由，独立于番茄官方 API。
 shuqi = ["dep:md-5"]
 
+# 七猫（Qimao）小说提供商：通过 `qm:<bookId>` 前缀路由，整本缓存 ZIP 下载。
+qimao = ["dep:md-5"]
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }

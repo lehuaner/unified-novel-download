@@ -20,9 +20,11 @@ mod book_parser;
 mod download;
 mod network_parser;
 mod prewarm_state;
-mod third_party;
 #[cfg(feature = "shuqi")]
 mod shuqi;
+#[cfg(feature = "qimao")]
+mod qimao;
+mod third_party;
 mod ui;
 
 use base_system::config::{ConfigSpec, load_or_create, load_or_create_with_base};

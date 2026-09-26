@@ -39,7 +39,10 @@ pub(crate) async fn api_search(
         #[cfg(feature = "shuqi")]
         let want_shuqi =
             provider_filter.is_empty() || provider_filter == "all" || provider_filter == "shuqi";
-        #[cfg(not(feature = "shuqi"))]
+        #[cfg(feature = "qimao")]
+        let want_qimao =
+            provider_filter.is_empty() || provider_filter == "all" || provider_filter == "qimao";
+        #[cfg(all(not(feature = "shuqi"), not(feature = "qimao")))]
         let _ = provider_filter;
 
         let mut all_items: Vec<Value> = Vec::new();
@@ -82,6 +85,18 @@ pub(crate) async fn api_search(
             None
         };
 
+        // 七猫（Qimao）搜索
+        #[cfg(feature = "qimao")]
+        let qimao_handle = if want_qimao {
+            let kw = keyword.to_string();
+            Some(tokio::task::spawn_blocking(move || {
+                let client = crate::qimao::QimaoClient::new(15)?;
+                crate::qimao::search_items(&client, &kw)
+            }))
+        } else {
+            None
+        };
+
         if let Some(handle) = fanqie_handle {
             match handle.await {
                 Ok(Ok(items)) => all_items.extend(items),
@@ -96,6 +111,15 @@ pub(crate) async fn api_search(
                 Ok(Ok(items)) => all_items.extend(items),
                 Ok(Err(e)) => errors.push(format!("书旗搜索失败: {e}")),
                 Err(_) => errors.push("书旗搜索任务执行失败".to_string()),
+            }
+        }
+
+        #[cfg(feature = "qimao")]
+        if let Some(handle) = qimao_handle {
+            match handle.await {
+                Ok(Ok(items)) => all_items.extend(items),
+                Ok(Err(e)) => errors.push(format!("七猫搜索失败: {e}")),
+                Err(_) => errors.push("七猫搜索任务执行失败".to_string()),
             }
         }
 

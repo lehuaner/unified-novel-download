@@ -49,7 +49,8 @@ fn pkcs7_pad(data: &[u8]) -> Vec<u8> {
 /// AES-128-CBC 解密（手动 CBC 模式）。
 ///
 /// `data` = IV(16) + ciphertext，`key_hex` = 32 hex chars。
-fn aes_cbc_decrypt(data: &[u8], key_hex: &str) -> Result<Vec<u8>> {
+/// 供七猫（Qimao）源复用：七猫正文同样是 base64(IV+AES-CBC)，PKCS7 填充。
+pub(crate) fn aes_cbc_decrypt(data: &[u8], key_hex: &str) -> Result<Vec<u8>> {
     if data.len() < 16 {
         return Err(anyhow!("encrypted data too short: {} bytes", data.len()));
     }

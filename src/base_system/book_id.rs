@@ -89,6 +89,12 @@ pub fn parse_book_id(input: &str) -> Option<String> {
         return Some(id);
     }
 
+    // 七猫（Qimao）识别：qm: 前缀或 qimao.com/wtzw.com URL
+    #[cfg(feature = "qimao")]
+    if let Some(id) = crate::qimao::normalize_book_input(trimmed) {
+        return Some(id);
+    }
+
     // If user pasted extra text around the URL, try to extract URL first.
     let target = re_url()
         .find(trimmed)
