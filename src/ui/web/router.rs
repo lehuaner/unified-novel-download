@@ -41,7 +41,10 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/download/*path", get(routes::download::download_file))
         .route("/download-zip/*path", get(routes::download::download_zip))
         .route("/api/search", get(routes::search::api_search))
-        .route("/api/search-cover", get(routes::search_cover::api_search_cover))
+        .route(
+            "/api/search-cover",
+            get(routes::search_cover::api_search_cover),
+        )
         .route("/api/preview/:book_id", get(routes::preview::api_preview))
         .route(
             "/api/preview/:book_id/cleanup",
@@ -109,7 +112,9 @@ async fn auth_and_log_mw(
                 .get(axum::http::header::COOKIE)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|raw| {
-                    cookie_value(raw, "tomato_session").or_else(|| cookie_value(raw, "auth_token"))
+                    cookie_value(raw, "tomato_session")
+                        .or_else(|| cookie_value(raw, "tomato_device"))
+                        .or_else(|| cookie_value(raw, "auth_token"))
                 });
 
             let mut authorized = session_cookie

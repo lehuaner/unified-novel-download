@@ -202,6 +202,20 @@ function parseBookId(input) {
     }
   } catch (_) { /* not a URL */ }
 
+  // 七猫（Qimao）：qm: 前缀或 qimao.com / wtzw.com URL
+  if (/^qm:[0-9]+$/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (/(^|\.)qimao\.com$/.test(host) || /(^|\.)wtzw\.com$/.test(host)) {
+      const bid = parsed.searchParams.get('id')
+        || parsed.searchParams.get('book_id')
+        || parsed.searchParams.get('bid')
+        || (parsed.pathname.match(/\/(?:book|detail|reader)\/(\d+)/i) || [])[1];
+      if (bid) return 'qm:' + bid;
+    }
+  } catch (_) { /* not a URL */ }
+
   const urlMatch = trimmed.match(/https?:\/\/\S+/i);
   const target = urlMatch ? urlMatch[0] : trimmed;
 
@@ -874,6 +888,9 @@ async function refreshLibrary(start = true) {
 async function doSearch(q) {
   const out = document.getElementById('searchResults');
   out.innerHTML = '';
+  // 搜索时收起首页面板，突出结果
+  const panels = document.getElementById('homePanels');
+  if (panels) panels.classList.add('hidden');
   if (!q) return;
 
   // 进度显示
@@ -891,6 +908,7 @@ async function doSearch(q) {
   const providers = [
     { name: 'fanqie', label: '番茄' },
     { name: 'shuqi', label: '书旗' },
+    { name: 'qimao', label: '七猫' },
   ];
   const totalProviders = providers.length;
   let completedProviders = 0;
@@ -925,9 +943,11 @@ async function doSearch(q) {
     return;
   }
   for (const b of allItems) {
-    const isShuqi = String(b.book_id ?? '').startsWith('sq:');
-    const sourceLabel = isShuqi ? '书旗' : '番茄';
-    const sourceClass = isShuqi ? 'tag tag-blue' : 'tag tag-green';
+    const bidStr = String(b.book_id ?? '');
+    const sourceLabel = bidStr.startsWith('sq:') ? '书旗'
+      : bidStr.startsWith('qm:') ? '七猫' : '番茄';
+    const sourceClass = bidStr.startsWith('sq:') ? 'tag tag-blue'
+      : bidStr.startsWith('qm:') ? 'tag tag-orange' : 'tag tag-green';
     const coverUrl = b.cover_url ?? '';
     const coverHtml = coverUrl
       ? `<img class="search-cover-thumb" src="/api/search-cover?url=${encodeURIComponent(coverUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">`
@@ -946,6 +966,99 @@ async function doSearch(q) {
 }
 
 // ── Preview ────────────────────────────────────────────────────────
+
+// ── Search Home: history + recent downloads ────────────────────────
+
+let homeSearchActive = false;
+
+const SEARCH_HISTORY_KEY = 'tnd.search_history';
+const SEARCH_HISTORY_MAX = 12;
+
+function getSearchHistory() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+function saveSearchHistory(list) {
+  try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(list.slice(0, SEARCH_HISTORY_MAX))); } catch {}
+}
+function recordSearchHistory(keyword) {
+  const kw = (keyword || '').toString().trim();
+  if (!kw) return;
+  const list = getSearchHistory().filter(x => x !== kw);
+  list.unshift(kw);
+  saveSearchHistory(list);
+  renderSearchHistory();
+}
+function clearSearchHistory() {
+  try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch {}
+  renderSearchHistory();
+}
+function renderSearchHistory() {
+  const box = document.getElementById('searchHistory');
+  const clearBtn = document.getElementById('clearSearchHistory');
+  if (!box) return;
+  const list = getSearchHistory();
+  if (clearBtn) clearBtn.classList.toggle('hidden', list.length === 0);
+  if (list.length === 0) { box.innerHTML = '<span class="k">暂无搜索记录</span>'; return; }
+  box.innerHTML = '';
+  for (const kw of list) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = kw;
+    chip.addEventListener('click', () => {
+      const inp = document.getElementById('q');
+      if (inp) inp.value = kw;
+      runSearch(kw);
+    });
+    box.appendChild(chip);
+  }
+}
+
+async function loadRecentDownloads() {
+  const box = document.getElementById('recentDownloads');
+  if (!box) return;
+  try {
+    const data = await j('/api/history?limit=8');
+    const items = (data.items || []).filter(it => it && it.book_id);
+    if (items.length === 0) { box.innerHTML = '<span class="k">暂无下载记录</span>'; return; }
+    box.innerHTML = '';
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'recent-item';
+      const name = it.book_name || it.book_id;
+      row.innerHTML = `<button type="button" class="recent-open" data-bookid="${esc(it.book_id)}">${esc(name)}</button><span class="recent-sub">${esc(it.author || '')}</span>`;
+      box.appendChild(row);
+    }
+  } catch { box.innerHTML = '<span class="k">加载失败</span>'; }
+}
+
+// 统一搜索入口：book_id/链接直接下载（不记历史），名称搜索记入历史。
+async function runSearch(rawQ) {
+  const q = (rawQ || '').toString().trim();
+  if (!q) return;
+  const hint = document.getElementById('searchHint');
+  if (hint) hint.textContent = '';
+  homeSearchActive = true;
+
+  const bookId = parseBookId(q);
+  if (bookId) {
+    try {
+      await startDownload(bookId);
+      if (hint) hint.textContent = `已创建下载任务：${bookId}`;
+      const out = document.getElementById('searchResults');
+      if (out) out.innerHTML = '<tr class="empty-row"><td colspan="6">已加入任务队列，可在"任务"页查看进度</td></tr>';
+    } catch (err) {
+      if (hint) hint.textContent = '创建任务失败';
+      alert(err);
+    }
+    return;
+  }
+  recordSearchHistory(q);
+  try { await doSearch(q); } catch (err) { alert(err); }
+}
 
 let currentPreviewBookId = null;
 let currentPreviewData = null;
@@ -1540,13 +1653,20 @@ function wire() {
   const sections = document.querySelectorAll('.section');
 
   function switchSection(hash) {
-    if (!hash) hash = '#status';
+    if (!hash) hash = '#search';
     navLinks.forEach(link => {
       link.classList.toggle('active', link.getAttribute('href') === hash);
     });
     sections.forEach(sec => {
       sec.classList.toggle('active', '#' + sec.id === hash);
     });
+    // 首页=搜索页：无搜索时展示“搜索记录 + 最近下载”面板
+    if (hash === '#search' && !homeSearchActive) {
+      const panels = document.getElementById('homePanels');
+      if (panels) panels.classList.remove('hidden');
+      renderSearchHistory();
+      loadRecentDownloads().catch(() => {});
+    }
   }
 
   window.addEventListener('hashchange', () => switchSection(window.location.hash));
@@ -1598,26 +1718,12 @@ function wire() {
   if (searchForm) {
     searchForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const q = document.getElementById('q').value.trim();
-      const hint = document.getElementById('searchHint');
-      if (hint) hint.textContent = '';
-
-      const bookId = parseBookId(q);
-      if (bookId) {
-        try {
-          await startDownload(bookId);
-          if (hint) hint.textContent = `已创建下载任务：${bookId}`;
-          const out = document.getElementById('searchResults');
-          if (out) out.innerHTML = '<tr class="empty-row"><td colspan="6">已加入任务队列，可在"任务"页查看进度</td></tr>';
-        } catch (err) {
-          if (hint) hint.textContent = '创建任务失败';
-          alert(err);
-        }
-        return;
-      }
-      try { await doSearch(q); } catch (err) { alert(err); }
+      await runSearch(document.getElementById('q').value);
     });
   }
+
+  const clearHistBtn = document.getElementById('clearSearchHistory');
+  if (clearHistBtn) clearHistBtn.addEventListener('click', clearSearchHistory);
 
   // -- Updates --
   const updBtn = document.getElementById('updatesRefresh');
@@ -1778,6 +1884,10 @@ function wire() {
       const p = (t.getAttribute('data-path') || '').toString();
       libraryPath = p;
       try { await refreshLibrary(); } catch (err) { alert(err); }
+    }
+    if (t.classList.contains('recent-open')) {
+      const bookId = t.getAttribute('data-bookid');
+      try { await startDownload(bookId); } catch (err) { alert(err); }
     }
   });
 

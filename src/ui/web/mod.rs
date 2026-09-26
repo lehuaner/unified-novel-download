@@ -42,7 +42,14 @@ pub fn run(
             if p.is_empty() {
                 None
             } else {
-                Some(AuthState::from_password(&p, cookie_secure))
+                // 会话签名密钥持久化到数据目录（config 同级），保证重启后已登录设备免密。
+                let secret_dir = config_path
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .unwrap_or(std::path::Path::new("."))
+                    .to_path_buf();
+                let session_secret = state::load_or_create_session_secret(&secret_dir);
+                Some(AuthState::from_password(&p, cookie_secure, session_secret))
             }
         });
 

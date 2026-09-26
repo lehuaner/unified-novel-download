@@ -417,10 +417,15 @@ pub(crate) struct AuthState {
 }
 
 const SESSION_TTL_SECS: u64 = 24 * 60 * 60;
+/// 受信设备 Cookie 有效期：一旦在某设备上登录过一次，长期免密放行（跨浏览器会话与服务重启）。
+const DEVICE_TTL_SECS: u64 = 180 * 24 * 60 * 60;
 const LOGIN_RATE_WINDOW_SECS: u64 = 1;
 const LOGIN_RATE_MAX_ATTEMPTS: usize = 5;
 const LOGIN_LOCK_AFTER_FAILURES: u32 = 10;
 const LOGIN_LOCK_SECS: u64 = 5 * 60;
+
+/// 文件名：持久化的会话签名密钥（放在数据目录，保证重启后已登录设备的 Cookie 仍有效）。
+pub(crate) const SESSION_SECRET_FILE: &str = "web_session_secret.key";
 
 #[derive(Debug, Default)]
 struct LoginAttemptState {
@@ -437,22 +442,14 @@ pub(crate) enum LoginLimitDecision {
 }
 
 impl AuthState {
-    pub(crate) fn from_password(password: &str, cookie_secure: bool) -> Self {
+    /// 从密码 + 已持久化的会话密钥构造 AuthState。
+    /// `session_secret` 应由 [`load_or_create_session_secret`] 提供，保证跨服务重启稳定。
+    pub(crate) fn from_password(password: &str, cookie_secure: bool, session_secret: [u8; 32]) -> Self {
         let mut h = Sha256::new();
         h.update(password.as_bytes());
         let out = h.finalize();
         let mut password_sha256 = [0u8; 32];
         password_sha256.copy_from_slice(&out);
-
-        let nonce = Uuid::new_v4();
-        let now = now_secs();
-        let mut s = Sha256::new();
-        s.update(password_sha256);
-        s.update(now.to_le_bytes());
-        s.update(nonce.as_bytes());
-        let secret = s.finalize();
-        let mut session_secret = [0u8; 32];
-        session_secret.copy_from_slice(&secret);
 
         Self {
             password_sha256,
@@ -531,7 +528,16 @@ impl AuthState {
     }
 
     pub(crate) fn issue_session_token(&self) -> String {
-        let exp = now_secs().saturating_add(SESSION_TTL_SECS);
+        self.issue_token(SESSION_TTL_SECS)
+    }
+
+    /// 签发长效“受信设备”令牌：登录成功时下发，使该设备长期免密。
+    pub(crate) fn issue_device_token(&self) -> String {
+        self.issue_token(DEVICE_TTL_SECS)
+    }
+
+    fn issue_token(&self, ttl_secs: u64) -> String {
+        let exp = now_secs().saturating_add(ttl_secs);
         let nonce = Uuid::new_v4().simple().to_string();
         let payload = format!("{exp}.{nonce}");
         let sig = self.sign_payload(&payload);
@@ -569,6 +575,10 @@ impl AuthState {
         SESSION_TTL_SECS
     }
 
+    pub(crate) fn device_ttl_secs(&self) -> u64 {
+        DEVICE_TTL_SECS
+    }
+
     pub(crate) fn cookie_secure(&self) -> bool {
         self.cookie_secure
     }
@@ -579,6 +589,35 @@ impl AuthState {
         h.update(payload.as_bytes());
         hex::encode(h.finalize())
     }
+}
+
+/// 从数据目录读取持久化的会话签名密钥；不存在则生成随机密钥并落盘。
+/// 保证服务重启后已登录设备（含长效 device cookie）的令牌仍可校验，无需重新输入密码。
+pub(crate) fn load_or_create_session_secret(dir: &std::path::Path) -> [u8; 32] {
+    let file = dir.join(SESSION_SECRET_FILE);
+    if let Ok(bytes) = std::fs::read(&file)
+        && bytes.len() == 32
+    {
+        let mut secret = [0u8; 32];
+        secret.copy_from_slice(&bytes);
+        return secret;
+    }
+
+    let now = now_secs();
+    let a = Uuid::new_v4();
+    let b = Uuid::new_v4();
+    let mut h = Sha256::new();
+    h.update(a.as_bytes());
+    h.update(b.as_bytes());
+    h.update(now.to_le_bytes());
+    let digest = h.finalize();
+    let mut secret = [0u8; 32];
+    secret.copy_from_slice(&digest);
+
+    if std::fs::create_dir_all(dir).is_ok() {
+        let _ = std::fs::write(&file, secret);
+    }
+    secret
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -597,9 +636,37 @@ mod auth_tests {
     use super::*;
     use std::net::IpAddr;
 
+    fn test_secret() -> [u8; 32] {
+        let mut s = [0u8; 32];
+        s[0] = 0xAB;
+        s
+    }
+
+    #[test]
+    fn session_secret_persists_across_calls() {
+        let dir = std::env::temp_dir().join(format!("tnd_secret_test_{}", now_ms()));
+        let a = load_or_create_session_secret(&dir);
+        let b = load_or_create_session_secret(&dir);
+        assert_eq!(a, b, "同一目录应返回相同密钥（已落盘）");
+        // 同一密钥签发的令牌可被校验
+        let auth1 = AuthState::from_password("pw", false, a);
+        let auth2 = AuthState::from_password("pw", false, b);
+        let tok = auth1.issue_device_token();
+        assert!(auth2.verify_session_token(&tok));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn device_token_has_long_ttl_and_verifies() {
+        let auth = AuthState::from_password("secret", false, test_secret());
+        let tok = auth.issue_device_token();
+        assert!(auth.verify_session_token(&tok));
+        assert!(auth.device_ttl_secs() > auth.session_ttl_secs());
+    }
+
     #[test]
     fn login_rate_limit_allows_five_attempts_per_second() {
-        let auth = AuthState::from_password("secret", false);
+        let auth = AuthState::from_password("secret", false, test_secret());
         let ip = IpAddr::from([127, 0, 0, 1]);
 
         for _ in 0..LOGIN_RATE_MAX_ATTEMPTS {
@@ -613,7 +680,7 @@ mod auth_tests {
 
     #[test]
     fn repeated_failures_lock_ip_and_success_resets_state() {
-        let auth = AuthState::from_password("secret", false);
+        let auth = AuthState::from_password("secret", false, test_secret());
         let ip = IpAddr::from([127, 0, 0, 2]);
 
         for _ in 1..LOGIN_LOCK_AFTER_FAILURES {
@@ -631,8 +698,8 @@ mod auth_tests {
 
     #[test]
     fn session_defaults_are_short_lived_and_secure_flag_is_configurable() {
-        let insecure = AuthState::from_password("secret", false);
-        let secure = AuthState::from_password("secret", true);
+        let insecure = AuthState::from_password("secret", false, test_secret());
+        let secure = AuthState::from_password("secret", true, test_secret());
 
         assert_eq!(insecure.session_ttl_secs(), 24 * 60 * 60);
         assert!(!insecure.cookie_secure());

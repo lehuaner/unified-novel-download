@@ -960,4 +960,38 @@ button.success {
 }
 .tag-green { background: #e8f5e9; color: #2e7d32; }
 .tag-blue { background: #e3f2fd; color: #1565c0; }
+.tag-orange { background: #fff3e0; color: #e65100; }
+
+/* ===== Search Home Panels ===== */
+.home-panels { display: flex; flex-direction: column; gap: 18px; }
+.home-block-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.home-block-title { font-weight: 700; font-size: 0.95rem; color: var(--text-main); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+  border-radius: 16px;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.chip:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+.recent-list { display: flex; flex-direction: column; gap: 2px; }
+.recent-item { display: flex; align-items: baseline; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.recent-item:hover { background: var(--primary-light); }
+.recent-open { background: none; border: none; color: var(--primary); font-size: 0.92rem; font-weight: 600; cursor: pointer; text-align: left; padding: 0; }
+.recent-open:hover { text-decoration: underline; }
+.recent-sub { color: var(--text-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-btn { background: none; border: none; color: var(--text-muted); font-size: 0.8rem; cursor: pointer; padding: 2px 4px; }
+.link-btn:hover { color: var(--danger); text-decoration: underline; }
+.link-primary { color: var(--primary); text-decoration: none; font-size: 0.85rem; }
+.link-primary:hover { text-decoration: underline; }
+
+/* ===== 移动端：品牌仅显示图标 ===== */
+@media (max-width: 768px) {
+  .brand .brand-text { display: none; }
+  .brand { padding: 12px 14px; gap: 0; }
+}
 

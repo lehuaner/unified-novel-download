@@ -74,6 +74,14 @@ pub(crate) async fn api_login(
         secure_attr,
         auth.session_ttl_secs()
     );
+    // 受信设备长效 Cookie：登录一次后该设备长期免密（跨重启，由持久化密钥保障）。
+    let device_token = auth.issue_device_token();
+    let device_cookie = format!(
+        "tomato_device={}; Path=/; HttpOnly; SameSite=Lax{}; Max-Age={}",
+        device_token,
+        secure_attr,
+        auth.device_ttl_secs()
+    );
     // 兼容旧前端/旧代理配置：同值下发 auth_token，避免出现“Cookie 已下发但后端不识别”。
     let compat_cookie = format!(
         "auth_token={}; Path=/; HttpOnly; SameSite=Lax{}; Max-Age={}",
@@ -89,6 +97,7 @@ pub(crate) async fn api_login(
     Ok((
         AppendHeaders([
             (SET_COOKIE, cookie),
+            (SET_COOKIE, device_cookie),
             (SET_COOKIE, compat_cookie),
             (SET_COOKIE, clear_legacy_cookie.to_string()),
         ]),
