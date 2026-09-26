@@ -8,7 +8,7 @@
 //!
 //! 需要用户先启动 unidbg-boot-server（端口 8099）。
 
-use anyhow::{Result, anyhow, Context};
+use anyhow::{Context, Result, anyhow};
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -35,8 +35,7 @@ const ROM_VERSION: &str = "V291IR+release-keys";
 const RESOLUTION: &str = "3200*1440";
 const DPI: &str = "640";
 const HOST_ABI: &str = "arm64-v8a";
-const USER_AGENT: &str =
-    "com.dragon.read.oversea.gp/68132 (Linux; U; Android 10; zh_CN; OnePlus11; Build/V291IR;tt-ok/3.12.13.4-tiktok)";
+const USER_AGENT: &str = "com.dragon.read.oversea.gp/68132 (Linux; U; Android 10; zh_CN; OnePlus11; Build/V291IR;tt-ok/3.12.13.4-tiktok)";
 const COOKIE: &str = "store-region=cn-zj; store-region-src=did; install_id=933935730456617";
 
 fn now_ms() -> u64 {
@@ -89,7 +88,10 @@ fn build_common_headers() -> HashMap<String, String> {
     let mut h = HashMap::new();
     h.insert("Cookie".into(), COOKIE.into());
     h.insert("User-Agent".into(), USER_AGENT.into());
-    h.insert("Accept".into(), "application/json; charset=utf-8,application/x-protobuf".into());
+    h.insert(
+        "Accept".into(),
+        "application/json; charset=utf-8,application/x-protobuf".into(),
+    );
     h.insert("Accept-Encoding".into(), "gzip".into());
     h.insert("x-xs-from-web".into(), "0".into());
     h.insert("x-ss-req-ticket".into(), now.to_string());
@@ -153,6 +155,7 @@ impl FqApiClient {
     }
 
     /// 获取 registerkey 解密密钥（带缓存，5 分钟过期）。
+    #[allow(dead_code)]
     fn get_decryption_key(&self) -> Result<(String, i64)> {
         {
             let cache = self.cached_key.lock().unwrap_or_else(|e| e.into_inner());
@@ -165,7 +168,8 @@ impl FqApiClient {
             }
         }
         let (key, keyver) = self.fetch_register_key()?;
-        *self.cached_key.lock().unwrap_or_else(|e| e.into_inner()) = Some((key.clone(), keyver, now_ms()));
+        *self.cached_key.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((key.clone(), keyver, now_ms()));
         Ok((key, keyver))
     }
 
@@ -201,17 +205,19 @@ impl FqApiClient {
         let v: Value = resp.json().context("registerkey parse JSON failed")?;
         let code = v.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         if code != 0 {
-            return Err(anyhow!("registerkey code={code}: {}", v.get("message").and_then(|m| m.as_str()).unwrap_or("")));
+            return Err(anyhow!(
+                "registerkey code={code}: {}",
+                v.get("message").and_then(|m| m.as_str()).unwrap_or("")
+            ));
         }
-        let data = v.get("data").ok_or_else(|| anyhow!("registerkey: no data field"))?;
+        let data = v
+            .get("data")
+            .ok_or_else(|| anyhow!("registerkey: no data field"))?;
         let encrypted_key = data
             .get("key")
             .and_then(|k| k.as_str())
             .ok_or_else(|| anyhow!("registerkey: no key field"))?;
-        let keyver = data
-            .get("keyver")
-            .and_then(|k| k.as_i64())
-            .unwrap_or(0);
+        let keyver = data.get("keyver").and_then(|k| k.as_i64()).unwrap_or(0);
 
         let key_hex = fq_crypto::get_real_key(encrypted_key)?;
         tracing::info!("registerkey 成功: keyver={keyver}");
@@ -219,6 +225,7 @@ impl FqApiClient {
     }
 
     /// 调用 batch_full API 获取章节内容（加密的），返回原始 JSON。
+    #[allow(dead_code)]
     fn fetch_batch_full(&self, item_ids: &str, book_id: &str) -> Result<Value> {
         let url = format!("{API_BASE}/reading/reader/batch_full/v");
         let mut params = build_common_params();
@@ -252,43 +259,130 @@ impl FqApiClient {
         Ok(v)
     }
 
-    /// 获取并解密章节内容，返回 `serde_json::Value`（与 `extract_api_content` 兼容）。
+    /// 通过 unidbg sidecar 的批量正文端点获取章节内容（设备轮换/解密由 sidecar 内部完成）。
     ///
-    /// 返回格式：`{"data": {item_id: {"content": html, "title": title}, ...}}`。
-    /// `item_ids` 可逗号分隔多个 ID。
+    /// 返回格式与旧实现兼容：`{"data": {item_id: {"content": html, "title": title}, ...}}`。
+    /// `item_ids` 逗号分隔。空内容/失败按设备轮换退避重试（给 sidecar 换设备的机会）。
     pub(crate) fn get_contents(&self, item_ids: &str, book_id: &str) -> Result<Value> {
-        let (key_hex, _keyver) = self.get_decryption_key()?;
-        let resp = self.fetch_batch_full(item_ids, book_id)?;
-        let data = resp
-            .get("data")
-            .and_then(|d| d.as_object())
-            .ok_or_else(|| anyhow!("batch_full: no data object"))?;
+        let ids: Vec<String> = item_ids
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(String::from)
+            .collect();
+        if ids.is_empty() {
+            return Err(anyhow!("get_contents: empty item_ids"));
+        }
+
+        // 分块请求 sidecar，避免单请求章节过多；命中拒绝/空内容时退避重试，
+        // 让 sidecar 内部 nextDevice() 轮换到新设备。
+        const CHUNK: usize = 8;
+        const RETRY: usize = 3;
 
         let mut out = serde_json::Map::new();
-        for (item_id, item_val) in data {
-            let content = item_val
-                .get("content")
-                .and_then(|c| c.as_str())
+        let mut last_err: Option<String> = None;
+        for part in ids.chunks(CHUNK) {
+            let mut ok = false;
+            for attempt in 0..RETRY {
+                match self.fetch_chapters_via_sidecar(part, book_id) {
+                    Ok(map) => {
+                        for (k, v) in map {
+                            out.insert(k, v);
+                        }
+                        ok = true;
+                        break;
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        tracing::warn!(
+                            "sidecar 正文获取失败(第 {} 次, {} 章): {}",
+                            attempt + 1,
+                            part.len(),
+                            msg
+                        );
+                        last_err = Some(msg);
+                        std::thread::sleep(std::time::Duration::from_millis(
+                            800 * (attempt as u64 + 1),
+                        ));
+                    }
+                }
+            }
+            if !ok {
+                return Err(match last_err {
+                    Some(m) => anyhow!("sidecar 正文获取失败(已重试 {RETRY} 次): {m}"),
+                    None => anyhow!("sidecar 正文获取失败"),
+                });
+            }
+        }
+
+        if out.is_empty() {
+            return Err(anyhow!("sidecar 返回章节内容为空"));
+        }
+        Ok(serde_json::json!({"data": out}))
+    }
+
+    /// 调用 sidecar `POST /api/fqnovel/chapters/batch`，解析章节内容为
+    /// `Map<item_id, {"content","title"}>`。设备轮换与解密在 sidecar 内部完成。
+    fn fetch_chapters_via_sidecar(
+        &self,
+        ids: &[String],
+        book_id: &str,
+    ) -> Result<serde_json::Map<String, Value>> {
+        let endpoint = format!("{}/api/fqnovel/chapters/batch", self.signer.base_url());
+        let body = serde_json::json!({
+            "bookId": book_id,
+            "chapterIds": ids,
+        });
+        let resp = self
+            .http
+            .post(&endpoint)
+            .json(&body)
+            .send()
+            .context("sidecar chapters request failed")?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("sidecar chapters HTTP {}", resp.status()));
+        }
+        let v: Value = resp.json().context("sidecar chapters parse failed")?;
+        let code = v.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
+        if code != 0 {
+            return Err(anyhow!(
+                "sidecar chapters code={code}: {}",
+                v.get("message").and_then(|m| m.as_str()).unwrap_or("")
+            ));
+        }
+        let chapters = v
+            .get("data")
+            .and_then(|d| d.get("chapters"))
+            .and_then(|c| c.as_object())
+            .ok_or_else(|| anyhow!("sidecar chapters: no data.chapters"))?;
+
+        let mut map = serde_json::Map::new();
+        for (id, info) in chapters {
+            let raw = info
+                .get("rawContent")
+                .and_then(|x| x.as_str())
                 .unwrap_or("");
+            let txt = info
+                .get("txtContent")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            let name = info
+                .get("chapterName")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
+            let content = if !raw.is_empty() { raw } else { txt };
             if content.is_empty() || content == "Invalid" {
                 continue;
             }
-            let title = item_val
-                .get("title")
-                .and_then(|t| t.as_str())
-                .unwrap_or("")
-                .to_string();
-            let html = fq_crypto::decrypt_and_decompress(content, &key_hex)
-                .with_context(|| format!("decrypt item_id={item_id}"))?;
-            out.insert(
-                item_id.clone(),
-                serde_json::json!({"content": html, "title": title}),
+            map.insert(
+                id.clone(),
+                serde_json::json!({"content": content, "title": name}),
             );
         }
-        if out.is_empty() {
-            return Err(anyhow!("batch_full: all items empty/invalid"));
+        if map.is_empty() {
+            return Err(anyhow!("sidecar chapters: all empty (device rejected?)"));
         }
-        Ok(serde_json::json!({"data": out}))
+        Ok(map)
     }
 
     /// 健康检查（signer 可达）。

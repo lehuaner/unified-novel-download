@@ -5,9 +5,9 @@
 //! - 内容解密：用内容密钥解密 Base64 编码的加密内容，前 16 字节为 IV，剩余为密文；
 //!   解密后若以 gzip 魔数 `1f 8b` 开头则 gunzip，否则直接 UTF-8 解码。
 
-use anyhow::{Result, anyhow};
 use aes::Aes128;
 use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
+use anyhow::{Result, anyhow};
 use base64::Engine;
 use flate2::read::GzDecoder;
 use std::io::Read;
@@ -59,7 +59,10 @@ fn aes_cbc_decrypt(data: &[u8], key_hex: &str) -> Result<Vec<u8>> {
     }
     let (iv, cipher) = data.split_at(16);
     if cipher.len() % 16 != 0 {
-        return Err(anyhow!("ciphertext length {} not multiple of 16", cipher.len()));
+        return Err(anyhow!(
+            "ciphertext length {} not multiple of 16",
+            cipher.len()
+        ));
     }
 
     let cipher_key = aes::cipher::generic_array::GenericArray::from_slice(&key_bytes);
@@ -104,7 +107,9 @@ fn aes_cbc_encrypt(plaintext: &[u8], key_hex: &str) -> Result<Vec<u8>> {
             .unwrap_or(0);
         let mut state = nanos as u64 ^ 0xDEADBEEF;
         for b in buf.iter_mut() {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *b = (state >> 33) as u8;
         }
         buf
@@ -139,7 +144,10 @@ pub(crate) fn get_real_key(registerkey_response_key: &str) -> Result<String> {
         .map_err(|e| anyhow!("base64 decode failed: {e}"))?;
     let decrypted = aes_cbc_decrypt(&raw, REG_KEY)?;
     if decrypted.len() < 16 {
-        return Err(anyhow!("decrypted key too short: {} bytes", decrypted.len()));
+        return Err(anyhow!(
+            "decrypted key too short: {} bytes",
+            decrypted.len()
+        ));
     }
     Ok(hex::encode(&decrypted[..16]))
 }
@@ -150,6 +158,7 @@ pub(crate) fn get_real_key(registerkey_response_key: &str) -> Result<String> {
 /// `key_hex` = 32 hex chars（来自 `get_real_key`）。
 ///
 /// 对应 Java `FqCrypto.decryptAndDecompressContent`。
+#[allow(dead_code)] // 保留：直连解密回退路径用（正文默认已改走 sidecar 轮换端点）。
 pub(crate) fn decrypt_and_decompress(encrypted_content: &str, key_hex: &str) -> Result<String> {
     let raw = base64::engine::general_purpose::STANDARD
         .decode(encrypted_content.as_bytes())

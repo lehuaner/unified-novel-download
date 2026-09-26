@@ -34,17 +34,22 @@ pub(crate) async fn api_search(
         }
 
         let provider_filter = q.provider.as_deref().unwrap_or("").trim().to_lowercase();
-        let want_fanqie = provider_filter.is_empty() || provider_filter == "all" || provider_filter == "fanqie";
+        let want_fanqie =
+            provider_filter.is_empty() || provider_filter == "all" || provider_filter == "fanqie";
         #[cfg(feature = "shuqi")]
-        let want_shuqi = provider_filter.is_empty() || provider_filter == "all" || provider_filter == "shuqi";
+        let want_shuqi =
+            provider_filter.is_empty() || provider_filter == "all" || provider_filter == "shuqi";
         #[cfg(not(feature = "shuqi"))]
         let _ = provider_filter;
 
         let mut all_items: Vec<Value> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
 
+        // 两个源并发搜索：先各自 spawn_blocking，再统一 await，
+        // 使总耗时从“番茄 + 书旗”降为“max(番茄, 书旗)”。
+
         // 番茄搜索（unidbg 签名 sidecar 模式）
-        if want_fanqie {
+        let fanqie_handle = if want_fanqie {
             let signer_url = _state.config_view.unidbg_signer_url.trim();
             if !signer_url.is_empty() {
                 let kw = keyword.to_string();
@@ -53,29 +58,41 @@ pub(crate) async fn api_search(
                     let cfg = _state.config.lock().unwrap_or_else(|e| e.into_inner());
                     (cfg.request_timeout as u64).max(10) * 1000
                 };
-                match tokio::task::spawn_blocking(move || {
-                    let client = crate::third_party::fq_api_client::FqApiClient::new(&url, timeout_ms)?;
+                Some(tokio::task::spawn_blocking(move || {
+                    let client =
+                        crate::third_party::fq_api_client::FqApiClient::new(&url, timeout_ms)?;
                     client.search_books(&kw)
-                })
-                .await
-                {
-                    Ok(Ok(items)) => all_items.extend(items),
-                    Ok(Err(e)) => errors.push(format!("番茄搜索失败: {e}")),
-                    Err(_) => errors.push("番茄搜索任务执行失败".to_string()),
-                }
+                }))
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         // 书旗（Shuqi）搜索
         #[cfg(feature = "shuqi")]
-        if want_shuqi {
+        let shuqi_handle = if want_shuqi {
             let kw = keyword.to_string();
-            match tokio::task::spawn_blocking(move || {
+            Some(tokio::task::spawn_blocking(move || {
                 let client = crate::shuqi::ShuqiClient::new(15)?;
                 crate::shuqi::search_items(&client, &kw)
-            })
-            .await
-            {
+            }))
+        } else {
+            None
+        };
+
+        if let Some(handle) = fanqie_handle {
+            match handle.await {
+                Ok(Ok(items)) => all_items.extend(items),
+                Ok(Err(e)) => errors.push(format!("番茄搜索失败: {e}")),
+                Err(_) => errors.push("番茄搜索任务执行失败".to_string()),
+            }
+        }
+
+        #[cfg(feature = "shuqi")]
+        if let Some(handle) = shuqi_handle {
+            match handle.await {
                 Ok(Ok(items)) => all_items.extend(items),
                 Ok(Err(e)) => errors.push(format!("书旗搜索失败: {e}")),
                 Err(_) => errors.push("书旗搜索任务执行失败".to_string()),
