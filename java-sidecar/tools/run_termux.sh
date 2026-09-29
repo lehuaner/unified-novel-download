@@ -12,18 +12,14 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"          # java-sidecar
 JAR="$HERE/target/unidbg-boot-server-0.0.1-SNAPSHOT.jar"
 PORT="${SIDECAR_PORT:-8099}"
 
-# 1) 确保 sidecar jar（手机只下载，不编译）
+# 1) 确保 sidecar jar（手机只下载，不编译）。默认取本仓库最新 Release 资产，可用 SIDECAR_JAR_URL 覆盖。
+JAR_URL="${SIDECAR_JAR_URL:-https://github.com/lehuaner/unified-novel-download/releases/latest/download/unidbg-boot-server.jar}"
 if [ ! -f "$JAR" ]; then
-  if [ -n "${SIDECAR_JAR_URL:-}" ]; then
-    echo "[*] 下载 sidecar jar: $SIDECAR_JAR_URL"
-    mkdir -p "$HERE/target"
-    if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 -o "$JAR" "$SIDECAR_JAR_URL"
-    elif command -v wget >/dev/null 2>&1; then wget -O "$JAR" "$SIDECAR_JAR_URL"
-    else echo "[-] 需要 curl 或 wget"; exit 1; fi
-  else
-    echo "[-] 缺少 jar 且未设置 SIDECAR_JAR_URL：请在桌面/CI 用 tools/build.sh 构建后上传，或设置 SIDECAR_JAR_URL 下载。"
-    exit 1
-  fi
+  echo "[*] 下载 sidecar jar: $JAR_URL"
+  mkdir -p "$HERE/target"
+  if command -v curl >/dev/null 2>&1; then curl -fL --retry 3 -o "$JAR" "$JAR_URL"
+  elif command -v wget >/dev/null 2>&1; then wget -O "$JAR" "$JAR_URL"
+  else echo "[-] 需要 curl 或 wget"; exit 1; fi
 fi
 
 # 2) 选择 java

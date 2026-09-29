@@ -504,6 +504,8 @@ Write-Header "Starting Rust Binary (port $WEB_ADDR)"
 $env:UNIFIED_WEB_ADDR     = $WEB_ADDR
 $env:UNIFIED_WEB_PASSWORD = $WEB_PASSWORD
 $env:RUST_LOG            = "debug"
+# 番茄自签 sidecar 地址走环境变量（与 config.yml 未入库解耦；Rust 侧有同等回退）
+$env:UNIDBG_SIGNER_URL   = "http://127.0.0.1:$SIDECAR_PORT"
 
 $featureFlag   = if ($CARGO_FEATURES) { "--features", $CARGO_FEATURES } else { @() }
 $noDefaultFlag = if ($NO_DEFAULT_FEATURES) { "--no-default-features" } else { @() }

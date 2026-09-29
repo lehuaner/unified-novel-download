@@ -8,6 +8,7 @@ on:
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "java-sidecar/**"
       - ".github/workflows/build-rust.yml"
   workflow_dispatch:
 
@@ -662,8 +663,38 @@ jobs:
           name: macos-amd64-build
           path: dist
 
+  build-sidecar:
+    name: Build (sidecar jar)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout A Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build sidecar jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x java-sidecar/mvnw
+          ( cd java-sidecar && ./mvnw -DskipTests package )
+          mkdir -p dist
+          cp java-sidecar/target/unidbg-boot-server-0.0.1-SNAPSHOT.jar dist/unidbg-boot-server.jar
+          ls -l dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-build
+          path: dist
+
   publish-release:
-    needs: [build-linux, build-linux-musl, build-linux-musl-arm64, build-linux-arm64, build-android-arm64, build-android-arm32, build-windows, build-windows-arm64, build-macos, build-macos-amd64]
+    needs: [build-linux, build-linux-musl, build-linux-musl-arm64, build-linux-arm64, build-android-arm64, build-android-arm32, build-windows, build-windows-arm64, build-macos, build-macos-amd64, build-sidecar]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -776,6 +807,7 @@ jobs:
             release-artifacts/windows-arm64-build/UnifiedNovelDownloader-WinArm64-*.exe
             release-artifacts/macos-build/UnifiedNovelDownloader-macOS_arm64-*
             release-artifacts/macos-amd64-build/UnifiedNovelDownloader-macOS_amd64-*
+            release-artifacts/sidecar-build/unidbg-boot-server.jar
 
   docker-webui-glibc:
     name: Build & Push WebUI Docker Image (glibc)

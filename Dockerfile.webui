@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.6
 
+# ── Rust 主程序 ──
 FROM rust:1.92.0-bookworm AS builder
 
 WORKDIR /workspace
@@ -16,7 +17,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release --no-default-features --features shuqi,qimao,tts,docker
 
-FROM debian:bookworm-slim
+# ── 番茄签名 sidecar（Spring Boot + unidbg，含内嵌 .so）──
+FROM maven:3.9-eclipse-temurin-17 AS sidecar
+
+WORKDIR /sidecar
+
+COPY java-sidecar ./java-sidecar
+
+WORKDIR /sidecar/java-sidecar
+
+RUN mvn -B -DskipTests package
+
+# ── 运行镜像：JRE(供 sidecar) + Rust 二进制 ──
+FROM eclipse-temurin:17-jre-jammy
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
@@ -25,6 +38,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder /workspace/Unified-Novel-Downloader/target/release/unified-novel-downloader /app/unified-novel-downloader
+COPY --from=sidecar /sidecar/java-sidecar/target/unidbg-boot-server-0.0.1-SNAPSHOT.jar /app/sidecar.jar
 COPY docker-entrypoint-webui.sh /app/entrypoint.sh
 
 # 先去掉可能的 CRLF：Windows 工作副本直接 docker build 时，entrypoint 会因 \r 报 bad interpreter。
@@ -34,6 +48,10 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh \
 ENV UNIFIED_WEB_ADDR=0.0.0.0:18423
 ENV UNIFIED_DATA_DIR=
 ENV UNIFIED_WEB_PASSWORD=
+# 番茄自签：Rust 直连本地 sidecar；SIDECAR_ENABLED=0 可关闭容器内 sidecar（改走第三方 API）。
+ENV UNIDBG_SIGNER_URL=http://127.0.0.1:8099
+ENV SIDECAR_ENABLED=1
+ENV SIDECAR_JVM_OPTS="-Xms64m -Xmx512m"
 
 EXPOSE 18423
 

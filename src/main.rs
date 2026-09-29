@@ -106,6 +106,17 @@ fn main() -> Result<()> {
 
     let mut config = load_config_from_data_dir(data_dir)?;
 
+    // 番茄自签 sidecar 地址：config.yml 未入库（新机器默认为空）时用环境变量兜底，
+    // 使容器/一键启动无需手工编辑 config.yml。兼容改名前的 TOMATO_* 变量。
+    if config.unidbg_signer_url.trim().is_empty() {
+        if let Some(v) = base_system::env_first(&["UNIDBG_SIGNER_URL", "TOMATO_SIGNER_URL"]) {
+            let v = v.trim().to_string();
+            if !v.is_empty() {
+                config.unidbg_signer_url = v;
+            }
+        }
+    }
+
     // Handle command-line download/update modes
     if cli.download.is_some() || cli.update.is_some() {
         info!(target: "startup", "当前版本: v{}", VERSION);
