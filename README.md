@@ -1,321 +1,296 @@
-# 番茄小说下载器~~精简版~~
+# Unified Novel Downloader
 
-> 小小推广位：[RustEpubReader](https://github.com/zhongbai2333/RustEpubReader) <- 自研Epub阅读器，轻量快速  声明：阅读器项目不会添加下载器功能
+一个用 Rust 编写的多源小说下载器：搜索、抓取、导出为 txt / EPUB / PDF，并可选生成有声书。提供 TUI、Web UI、无障碍命令行三种入口，支持断点续传与下载库管理。
 
-> 小小推广位：[ShuaForge](https://github.com/zhongbai2333/ShuaForge) <- 自研刷题助手，使用AI帮助你实现高效复习，大学生一周内快速补充知识，允许从学习通等平台导入题库
+项目早期基于 [Dlmily/Tomato-Novel-Downloader-Lite](https://github.com/Dlmily/Tomato-Novel-Downloader-Lite) 衍生，后经完全重构，现由 [lehuaner](https://github.com/lehuaner) 维护。
 
-番茄小说下载器*不精简*版本，由于项目[fanqienovel-downloader](https://github.com/ying-ck/fanqienovel-downloader)一直不更新，于是我根据Dimily的项目Fork并重构
-
-目前完全使用`Rust`重写了整个项目，与原Fork项目几乎没有关系了（~~虽说原本的Python版本也没几行是原项目的了~~）
-
-我对其进行重构 + 优化，添加更多功能，包括：EPUB 下载支持、更好的断点续传、更好的错误管理、书本搜索、Web UI 等特性。
-
-本项目支持两种构建模式：
-
-- 默认模式（`official-api`）：保留 Official-API 能力（搜索/目录/段评等），同时也兼容第三方正文模式。
-- No-Official-API 模式（`no-official-api`）：**不依赖 Official-API crate**；目录/书信息走网页解析；**正文强制使用第三方 API 地址池**。
-
-为了保证第三方API安全，部分第三方接口相关代码并不开源，包括地址和token，敬请谅解，谢谢！
-
-为方便视障人士使用，我保留了老的CLI界面，接下来是启用方法：
-
-在第一次打开程序时 按三下 `o` 并回车 或者 按一下下方向键并按三下 `o` 都可以启用老版本CLI界面
-
-注意：切换成功应该会发出 `灯` 的一声
+> 本程序完全免费。如果你在别处为此付费，你被欺骗了。
 
 ---
 
-## 我该如何使用？
+## 支持的小说源
 
-根据自己的系统版本在[Releases](https://github.com/lehuaner/unified-novel-download/releases)列表下载可执行文件，并运行
-首次下载新书请优先使用 TUI 或 Web UI；CLI 仅保留更新本地已有小说的能力
+| 源 | 书籍 ID 写法 | 搜索 | 目录来源 | 正文来源 | 开箱可用 |
+| --- | --- | --- | --- | --- | --- |
+| 番茄 / 扇听（fanqie） | `7020269838396296228`、分享链接、短链 | Web UI ✅ / TUI ✅（分类 tab + 筛选器 + 分页） | 网页解析 | 第三方 API 地址池 **或** 本地 unidbg 签名 sidecar | ⚠️ 需二选一配置，见[正文获取方式](#正文获取方式) |
+| 书旗（shuqi） | `sq:8969239` | ✅ | 书旗开放接口 | 书旗章节接口 | ✅ |
+| 七猫（qimao） | `qm:152109` | ✅ | 七猫接口 | 整本缓存包 | ✅ |
 
-### 命令行模式（非交互）
-
-如果你需要在自动化脚本中使用下载器（例如为 Kindle 自动更新番茄小说），可以使用命令行参数更新**本地已经下载过**的书籍：
-
-- 更新指定书籍：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --update <book_id>
-    ```
-
-    示例：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --update 7318247498772674083
-    ```
-
-注意：
-
-- 命令行模式为非交互模式，会直接开始更新，无需手动输入
-- 使用配置文件（`config.yml`）中的默认保存路径和下载设置
-- **CLI 已禁用 `--download` 新建下载能力**，以降低脚本批量滥用风险
-- `--update` 只允许更新默认保存目录下**已经存在本地下载记录**的书籍
-- 如果书籍不存在本地记录，CLI 会拒绝执行，并提示改用 Web UI / TUI 完成首次下载
-- 只接受 book_id，不支持搜索功能
-
-### 老版 CLI（无 UI）说明
-
-- 老版 CLI 现已**禁用新建下载/搜索下载**
-- 仅保留以下能力：更新本地已有小说、查看下载历史、修改配置、检查程序更新
-- 如果需要首次下载新书，请使用默认 TUI 或 Web UI（`--server`）
-
-### Web UI 服务器模式（--server）
-
-如果你希望在局域网用浏览器操作（搜索、发起下载、查看任务、下载文件/打包下载文件夹），可以启用 Web UI：
-
-- 启动 Web UI：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --server
-    ```
-
-- 监听地址（默认 `127.0.0.1:18423`）：
-
-    通过环境变量修改监听地址，例如局域网访问：
-
-    ```sh
-    TOMATO_WEB_ADDR=0.0.0.0:18423
-    ```
-
-    IPv6 监听示例（注意 IPv6 需要方括号）：
-
-    ```sh
-    TOMATO_WEB_ADDR=[::]:18423
-    ```
-
-    同时监听多个地址（用逗号或分号分隔），例如同时监听 IPv4 + IPv6：
-
-    ```sh
-    TOMATO_WEB_ADDR=0.0.0.0:18423,[::]:18423
-    ```
-
-- 密码锁模式（防止陌生人使用）：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --server --password 你的密码
-    ```
-
-    或者使用环境变量：
-
-    ```sh
-    TOMATO_WEB_PASSWORD=你的密码
-    ```
-
-- 数据目录（用于 Docker 部署或集中管理配置/日志）：
-
-    通过 `--data-dir` 参数指定数据目录，程序会将 `config.yml` 和 `logs` 文件夹放在该目录下：
-
-    ```sh
-    Tomato-Novel-Downloader.exe --server --data-dir /data
-    ```
-
-    Docker 使用示例：
-
-    ```sh
-    docker run -v /host/data:/data my-tomato-image --server --data-dir /data
-    ```
-
-    这样可以方便地挂载数据目录，实现配置和日志的持久化。
-
-Web UI 提供的功能（纯 HTML，无需额外前端构建）：
-
-- 搜索书籍并创建下载任务
-- 任务列表/进度刷新/取消任务
-- 下载库按目录浏览（不再把所有文件递归平铺）
-- 文件直接下载
-- 文件夹一键打包为 zip 下载（保持目录结构，适配音频等“文件夹内包含文件夹”的情况）
-- 配置页面：可在线修改部分下载输出相关配置（会写回 `config.yml`）
-
-注意：Web UI 主要面向自建/局域网使用；如果要暴露到公网，建议放在反向代理/HTTPS 后面，并务必开启密码锁。
+- 无前缀的纯数字 ID 默认按番茄处理；若番茄侧解析失败，会自动回退尝试书旗、七猫。
+- 番茄的目录与书本信息由网页接口解析获得，不依赖任何官方客户端库。
+- **本程序不提供需要登录、VIP 付费章节的下载能力。**
 
 ---
 
-## Docker 镜像
+## 快速开始
 
-已提供 Web UI 版本的 Docker 镜像：
+### 1. 直接下载可执行文件
 
-- 镜像地址：[DockerHub](https://hub.docker.com/r/lehuaner/unified-novel-download-webui)
-- Tags 说明：
-  - `latest`：默认 **glibc** 版本（常规服务器/桌面环境）
-  - `latest-musl`：**musl** 版本，适用于 **软路由 / NAS** 等轻量系统
+到 [Releases](https://github.com/lehuaner/unified-novel-download/releases) 展开最新版本的 **Assets**，按系统选择：
 
-示例（映射端口与持久化数据目录，使用 glibc 版本）：
+| 系统 | 文件名 |
+| --- | --- |
+| Windows x64 | `UnifiedNovelDownloader-Win64-v<版本号>.exe` |
+| Windows ARM64 | `UnifiedNovelDownloader-WinArm64-v<版本号>.exe` |
+| Linux x64 / ARM64 | `UnifiedNovelDownloader-Linux_amd64-v<版本号>` / `-Linux_arm64-…` |
+| 软路由 / NAS（musl） | `UnifiedNovelDownloader-Linux_musl_amd64-v<版本号>` 等 |
+| macOS（Apple 芯片 / Intel） | `UnifiedNovelDownloader-macOS_arm64-v<版本号>` / `-macOS_amd64-…` |
+| Android（Termux） | `UnifiedNovelDownloader-Android_arm64-v<版本号>` |
+
+首次下载新书建议使用 Web UI 或 TUI；命令行模式只保留"更新本地已有小说"的能力。
+
+### 2. 一键安装脚本（Linux / macOS / Termux）
+
+```sh
+bash <(curl -sL https://raw.githubusercontent.com/lehuaner/unified-novel-download/main/installer.sh)
+```
+
+脚本会探测系统与架构、拉取对应资产、去掉版本号重命名为 `UnifiedNovelDownloader-<平台>`；在 Termux 下还会生成 `run.sh` 直接启动 Web UI。
+
+### 3. Docker（Web UI）
+
+镜像：[`lehuaner/unified-novel-download-webui`](https://hub.docker.com/r/lehuaner/unified-novel-download-webui)
+
+- `latest`：glibc 版（常规服务器 / 桌面）
+- `latest-musl`：musl 版（软路由 / NAS）
+- 另外每次发版还会推送 `v<版本号>-glibc` 与 `v<版本号>-musl` 固定标签
 
 ```sh
 docker run -d \
-    --name tomato-novel-webui \
+    --name unified-novel-webui \
     -p 18423:18423 \
     -v /host/data:/data \
-    -e TOMATO_WEB_ADDR=0.0.0.0:18423 \
-    -e TOMATO_WEB_PASSWORD=你的密码 \
+    -e UNIFIED_WEB_ADDR=0.0.0.0:18423 \
+    -e UNIFIED_WEB_PASSWORD=你的密码 \
     lehuaner/unified-novel-download-webui:latest --server --data-dir /data
 ```
 
-如果你使用软路由或 NAS 系统，请使用 musl 版本：
-
-```sh
-docker run -d \
-    --name tomato-novel-webui \
-    -p 18423:18423 \
-    -v /host/data:/data \
-    -e TOMATO_WEB_ADDR=0.0.0.0:18423 \
-    -e TOMATO_WEB_PASSWORD=你的密码 \
-    lehuaner/unified-novel-download-webui:latest-musl --server --data-dir /data
-```
-
-可通过 `TOMATO_WEB_ADDR`、`TOMATO_WEB_PASSWORD` 与 `--data-dir` 控制监听地址、密码与数据目录（见上文 Web UI 说明）。
+Docker 镜像已内置"禁用程序自更新"标记，升级请重新拉取镜像。
 
 ---
 
-## 构建模式（Cargo Features）
+## 使用方式
 
-本项目提供两个互斥的 feature：`official-api` 与 `no-official-api`（两者不能同时启用）。
-
-### 默认模式：official-api（默认启用）
-
-- 构建（默认就会启用）：
+### Web UI（推荐，功能最全）
 
 ```sh
-cargo build --release
+UnifiedNovelDownloader-Win64-v<版本号>.exe --server
 ```
 
-- 行为：
-  - 搜索功能可用（TUI / Web UI / 老 CLI 的搜索入口）。
-  - 段评（EPUB 段评页/资源抓取）可用（取决于配置项）。
-  - 正文获取可通过配置在“官方/第三方”之间切换（`use_official_api`）。
+浏览器打开 `http://127.0.0.1:18423/`。当前只有**搜索**与**下载库**两个页面，具体能力：
 
-### No-Official-API 模式：no-official-api（Issue #187）
+- 多源搜索（番茄分类 tab / 筛选器，书旗、七猫翻页），支持“加载更多”、搜索记录与一键清空
+- 书籍预览：核对封面 / 作者 / 字数 / 章节数，可选填下载范围（如 `1-50`）后再开始
+- 下载完成后弹窗确认书名与输出格式
+- 下载库浏览（按目录，不递归平铺）：刷新扫描、列数切换、按卡片下载成品文件、删除文件、目录打包为 zip（保留目录结构，适配有声书）
+- 进行中的任务以下载库卡片形式展示：进度百分比、排队中 / 下载中 / 失败 / 已取消状态徽章，并提供**取消任务**按钮
+- 已下载书籍若有新章节，卡片上显示“可更新 +N 章”标记
+- 密码锁登录与“受信任设备”免密；明暗主题切换
 
-- 构建：
+> 配置修改与程序自更新**未在 Web UI 提供入口**（`/api/status`、`/api/app_update`、`/api/history` 等接口仍存在，但前端无对应页面）。需要改配置、看下载历史或检查更新，请使用 TUI 或老 CLI。
+
+局域网 / 公网访问：
 
 ```sh
-# Linux/macOS
-cp Cargo_no_official.toml Cargo.toml
-cargo build --release
+# 监听所有网卡（同时监听 IPv4 与 IPv6，用逗号或分号分隔）
+UNIFIED_WEB_ADDR=0.0.0.0:18423,[::]:18423
 
-# Windows
-copy /Y Cargo_no_official.toml Cargo.toml
-cargo build --release
+# 启用密码锁
+UnifiedNovelDownloader-Win64-v<版本号>.exe --server --password 你的密码
+
+# HTTPS / 反向代理部署时给登录 Cookie 加 Secure 标志
+UnifiedNovelDownloader-Win64-v<版本号>.exe --server --cookie-secure
 ```
 
-仓库根目录提供了 `Cargo_no_official.toml`，该文件**完全不引用** `tomato-novel-official-api` 路径依赖，适合无法获取该 crate 的用户直接使用。
+> Web UI 面向自建/局域网使用。若要暴露到公网，请放在反向代理与 HTTPS 之后，并务必启用密码锁。登录后勾选"受信任设备"可免重复输入密码。
 
-- 行为差异（重点）：
-  - **不依赖** `tomato-novel-official-api` crate，可在缺少 Official-API 环境时编译。
-  - 目录与书本信息：使用网页解析（`FanqieWebNetwork`）。
-  - **正文获取：强制第三方模式**（忽略/不使用 `use_official_api=true` 的官方分支）。
-  - 搜索功能：不可用（会返回提示/报错）。
-  - 段评：不可用（会被强制关闭）。
+### TUI（默认入口）
+
+直接运行二进制即进入 TUI：搜索书籍、按 book_id 或粘贴分享链接下载、断点续传、失败重试、区间选择、格式选择、配置编辑、程序更新。
+
+- 输入关键词即调用多源搜索；番茄结果依赖下方 [正文获取方式](#正文获取方式) 中的 unidbg sidecar 配置，未配置时只返回书旗与七猫结果。
+- 选中条目后进入预览，确认范围再下载，链路与 Web UI 完全一致。
+- 需要 `Ctrl+V` 粘贴：桌面端开箱可用；Android Termux 需安装 Termux:API 并执行 `pkg install termux-api`。
+
+### 无障碍老 CLI
+
+为视障用户保留的纯文本界面。启用方式：首次进入程序时按三下 `o` 回车，或按一下方向键再按三下 `o`（切换成功会发出提示音）。
+
+老 CLI 仅保留：更新本地已有小说、查看下载历史、修改配置、检查更新。**已禁用新建下载与搜索下载。**
+
+### 命令行模式（非交互，仅更新已有书籍）
+
+如果你需要在自动化脚本中更新**本地已经下载过**的书籍（例如为 Kindle 自动追更）：
+
+```sh
+# 更新指定书籍
+UnifiedNovelDownloader-Win64-v<版本号>.exe --update <book_id>
+
+# 示例
+UnifiedNovelDownloader-Win64-v<版本号>.exe --update 7318247498772674083
+
+# 失败章节重试一次
+UnifiedNovelDownloader-Win64-v<版本号>.exe --update <book_id> --retry-failed
+```
+
+说明：
+
+- 非交互模式，执行后立即开始更新，无需输入
+- 使用 `config.yml` 中的保存路径与下载设置
+- **已禁用 `--download` 新建下载**，以降低脚本批量滥用风险
+- `--update` 只允许更新默认保存目录下**已有本地下载记录**的书籍；没有记录时会拒绝执行并提示改用 Web UI / TUI 完成首次下载
+- 只接受 book_id（可用 `sq:` / `qm:` 前缀），不支持搜索
 
 ---
 
-## Edge TTS 有声小说生成
+## 正文获取方式
 
-从当前版本开始，程序内置了 [msedge-tts](https://github.com/hs-cn/msedge-tts) 语音合成功能，可在下载文本后自动生成对应的有声小说：
+番茄正文支持两条路径，二者选其一即可（书旗、七猫无需任何配置）：
 
-- 在配置菜单（新 UI 或老 CLI 均可）中启用 `是否生成有声小说`，即可在每次下载完成后生成音频文件。
-- 默认发音人是 `zh-CN-XiaoxiaoNeural`，可以通过配置项自定义语速、音量、音调以及输出格式（`mp3` 或 `wav`）。音调值当前支持 Hz 写法，例如 `+2Hz`、`-10Hz`；若留空或填写 0 将忽略音调调整。
-- 可在“有声小说并发数”中调整 Edge TTS 并发任务数量（默认 24），生成时会显示进度条；请根据网络状况和机器性能选择适当的并发度。
-- 音频会存放在输出目录下的 `{书名}_audio` 文件夹中，并按章节顺序命名，例如 `0001-第一章.mp3`；若已下载到书籍封面，还会在该目录生成 `cover.jpg` 供 Voice 等播放器识别封面。
-- 重复运行或断点续跑时，已存在且非空的章节音频会自动跳过，仅补生成缺失章节。
-- msedge-tts 需要联网调用微软的在线服务，请确保运行环境可正常访问外网。
+**A. 第三方 API 地址池** —— 在 `config.yml` 中填写 `api_endpoints`
 
-如遇到生成失败，可在日志中查看详细错误信息。
+```yaml
+api_endpoints:
+  - https://<可用端点>
+```
+
+**B. 本地 unidbg 签名 sidecar** —— 自算签名直连，需自行部署 `unidbg-boot-server`
+
+```yaml
+unidbg_signer_url: http://127.0.0.1:8099
+```
+
+优先级：`unidbg_signer_url` 非空时走 B；否则走 A 的地址池（会先预热探测可用端点）。两者都为空时，下载会直接报错并提示如何配置。
+
+其余关键配置项（`config.yml`，程序首次运行自动生成）：
+
+| 配置项 | 说明 |
+| --- | --- |
+| `novel_format` | 输出格式：`txt` / `epub` / `pdf`，也支持"散装文件"或"下载后询问" |
+| `max_workers` | 并发线程数（默认 1；请勿盲目调高，会加大上游压力） |
+| `request_timeout` / `max_retries` / `min_wait_time` / `max_wait_time` / `min_connect_timeout` | 超时与退避重试 |
+| `save_path` | 保存目录，留空则使用程序所在目录 |
+| `enable_audiobook` 及 `audiobook_*` | 有声小说开关与参数 |
+| `first_line_indent_em` | EPUB 首行缩进 |
+| `preferred_book_name_field` | 书名字段优先级，可设 `ask_after_download` 每次询问 |
+| `download_comment_images` / `download_comment_avatars` / `media_download_workers` / `media_limit_per_chapter` / `media_max_dimension_px` | 章节内图片与头像的下载策略 |
+| `force_convert_images_to_jpeg` / `convert_heic_to_jpeg` / `jpeg_quality` / `keep_heic_original` | 图片转码策略（HEIC 自动转 JPEG 以兼容阅读器） |
+| `auto_clear_dump` / `allow_overwrite_files` / `auto_open_downloaded_files` | 缓存清理、覆盖与下载后打开 |
+
+> 段评（段落评论）功能当前不可用：其抓取依赖官方 API 通道，本项目的构建方案不提供，相关开关已从 TUI / 老 CLI / Web UI 中移除。实现代码保留在仓库中，待接入第三方段评接口后恢复。
+
+---
+
+## 有声小说
+
+内置 [msedge-tts](https://github.com/hs-cn/msedge-tts) 语音合成，可在文本下载后自动生成音频：
+
+- 在配置中开启 `是否生成有声小说` 即可；默认发音人 `zh-CN-XiaoxiaoNeural`，可调语速 / 音量 / 音调与输出格式（`mp3` / `wav`）。音调支持 Hz 写法（如 `+2Hz`、`-10Hz`），留空或 0 表示不调整。
+- `有声小说并发数` 默认 24，按机器与网络状况调整；生成过程显示进度。
+- 音频存放在输出目录下的 `{书名}_audio` 文件夹，按章节顺序命名（如 `0001-第一章.mp3`）；若已下载到封面会在该目录生成 `cover.jpg`，便于播放器识别封面。
+- 断点续跑：已存在且非空的章节音频会被跳过，只补生成缺失章节。
+- 也支持第三方 TTS：把 `audiobook_tts_provider` 设为 `third_party`，并配置 `audiobook_tts_api_url` / `audiobook_tts_api_token` / `audiobook_tts_model`（可指向本地服务）。
+- 使用 Edge TTS 需联网访问微软服务；生成失败时可在日志中查看详细错误。
+
+---
+
+## 构建
+
+单一构建方案：目录与正文均由第三方解析获取，全部小说源已在 `default` feature 中。
+
+```sh
+# 默认构建（番茄 + 书旗 + 七猫 + TTS + 桌面剪贴板）
+cargo build --release
+```
+
+输出二进制为 `target/release/unified-novel-downloader`（Windows 下带 `.exe`）。
+
+轻量 / 交叉编译场景（musl、Android）改用不依赖原生库的 TTS 后端：
+
+```sh
+cargo build --release --no-default-features --features shuqi,qimao,tts-native,clipboard
+```
+
+可用 feature：
+
+| feature | 作用 |
+| --- | --- |
+| `shuqi` / `qimao` | 启用书旗 / 七猫源（已在 `default` 中） |
+| `tts` | Edge TTS（`msedge-tts`，默认启用） |
+| `tts-native` | 以 `tungstenite` 实现 TTS，避免 openssl/curl 等原生依赖，适合 musl / android |
+| `clipboard` / `clipboard-arboard` | TUI 剪贴板；Android 走 Termux API，桌面走 arboard |
+| `docker` | Docker 专用构建，关闭程序自更新逻辑 |
+
+> ⚠️ 不要使用 `cargo build --all-features`：`tts` 与 `tts-native` 是两套互斥后端，`docker` 会关闭自更新。
+> ⚠️ 本地验证请勿随意加 `--no-default-features`，否则书旗 / 七猫的代码路径根本不会被编译，错误会漏到 CI 才暴露。日常检查与 feature 组合约定见 [MAINTAINING.md](./MAINTAINING.md)。
+
+开发调试（Windows，含 sidecar 联动与热重载）：
+
+```powershell
+.\run-dev.bat            # cargo-watch 自动重建
+.\run-dev.bat --no-watch # 直接 cargo run
+```
+
+---
+
+## 更新机制
+
+- **检查更新**：TUI / 老 CLI / Web UI 均可检查 GitHub Releases 新版本。
+- **自更新**：`--self-update`（或界面内操作）下载对应平台资产并替换当前可执行文件；Windows 通过临时 `.bat` 完成替换。
+- **热更新**：版本相同但二进制摘要不同时，启动会自动拉取同版本修正包替换。开发态（`cargo run` / target 目录内运行）自动跳过。
+- 若下载加速节点不可用，可设置 `TND_DISABLE_ACCEL=1` 直连 GitHub。
+
+---
+
+## 环境变量
+
+| 变量 | 说明 | 默认 |
+| --- | --- | --- |
+| `UNIFIED_WEB_ADDR` | Web UI 监听地址，支持 IPv6（`[::]:18423`）与逗号/分号分隔多地址 | `127.0.0.1:18423` |
+| `UNIFIED_WEB_PASSWORD` | Web UI 密码锁 | 无 |
+| `UNIFIED_WEB_COOKIE_SECURE` / `UNIFIED_COOKIE_SECURE` | 给登录 Cookie 加 `Secure`（等价 `--cookie-secure`） | `false` |
+| `UNIFIED_DATA_DIR` | Docker entrypoint 使用的数据目录（等价 `--data-dir`） | 无 |
+| `TND_DISABLE_ACCEL` | 置 `1` 时禁用下载加速，直连 GitHub | 未设置 |
+
+> 项目改名前这些变量以 `TOMATO_` 为前缀（如 `TOMATO_WEB_ADDR`）。读取侧仍接受旧名以保证既有部署可用，新部署请一律使用 `UNIFIED_*`。
+
+`--data-dir <路径>` 用于指定数据目录（`config.yml` 与 `logs` 存放位置），Docker 部署时挂载卷到该目录即可。
 
 ---
 
 ## 常见问题
 
-1. 之前就已经有了一个下载器，为什么还要再做一个？
+1. **番茄下载报"第三方 API 地址池为空"**
+   按[正文获取方式](#正文获取方式)配置 `api_endpoints` 或 `unidbg_signer_url`。书旗、七猫不受影响。
 
-    ~~本程序的初衷就是极致简化番茄小说下载器的代码，使程序更加易于操作与运行，并且更加稳定和快速！~~
-    本程序由于重构导致文件体积较大，无法做到原项目的简易，但是此项目胜在傻瓜式操作，无需多余配置，立即使用
+2. **下载章节失败**
+   多半不是接口完全失效，常见原因是并发过多导致接口临时熔断，稍后再试；也请确认书籍本身已更新。
 
-2. 手机端可以正常运行吗？
+3. **能不能调大线程数提速？**
+   不建议。调高 `max_workers` 会显著加大上游服务器压力，容易导致接口熔断，反而所有人都下载失败。
 
-    **仅限安卓设备（Termux）**可以运行。
-    但由于 **TUI/CLI 界面对小屏幕不太友好**，手机端更推荐使用 **Web UI 模式（--server）**：在 Termux 里启动服务，然后用手机浏览器操作（或让同一局域网的其它设备访问）。
+4. **章节很多怎么办？**
+   保守建议单本不超过 1500 章，过大书目请分段下载。
 
-    Release 里提供 Android arm64 构建产物：`UnifiedNovelDownloader-Android_arm64-[当前版本号]`，可直接在 Termux 中运行。
+5. **手机端怎么用？**
+   Android Termux 可用，但 TUI/CLI 对小屏不友好，推荐在 Termux 启动 Web UI（`--server`），用手机浏览器操作，或让同局域网其它设备访问。
 
-    另外：如果你希望在 TUI 中使用 `Ctrl+V` 从系统剪贴板粘贴，需要安装 Termux API：
+6. **代理 / VPN 导致失败**
+   请使用直连网络，任何影响网络正常性的代理都可能导致接口不可用。
 
-    - 安装 App：Termux:API
-    - 安装命令：`pkg install termux-api`
-    - 验证：`termux-clipboard-get` 可正常输出内容
+---
 
-    为了防止有些零基础的小白下载到了此程序，我们为您准备了一些教程：
+## 注意事项
 
-    下载termux(链接:(<https://github.com/termux/termux-app/releases>) 并安装，然后运行部署脚本：
+接口随时可能失效，遇到问题请到 [Issues](https://github.com/lehuaner/unified-novel-download/issues) 反馈。
 
-    ```sh
-    bash <(curl -sL https://raw.githubusercontent.com/lehuaner/unified-novel-download/main/installer.sh)
-    ```
-
-    安装完成后，推荐用 Web UI 启动（示例）：
-
-    ```sh
-    TOMATO_WEB_ADDR=0.0.0.0:18423 TOMATO_WEB_PASSWORD=你的密码 tomato-novel-downloader --server
-    ```
-
-    然后在浏览器打开：
-
-    - 本机：`http://127.0.0.1:18423/`
-    - 局域网其它设备：`http://<手机的局域网IP>:18423/`
-
-3. 电脑端该如何运行？
-
-    `Windows` 双击运行`UnifiedNovelDownloader-Win64-[当前版本号].exe`
-
-    `Linux` 和 `MacOS` 使用终端运行，可以使用一键部署脚本：
-
-    ```sh
-    bash <(curl -sL https://raw.githubusercontent.com/lehuaner/unified-novel-download/main/installer.sh)
-    ```
-
-4. 小说id是什么？在哪里获取？
-
-    推荐两种方式：
-
-    - 直接使用 Web UI 的“搜索书籍”，不需要手动找 ID。
-    - 如果你已经有分享链接/书籍信息，通常会包含一段很长的数字（Book ID）。复制该数字即可。
-
-5. 我是纯小白，程序在哪里下载啊
-
-    直接点击此链接(<https://github.com/lehuaner/unified-novel-download/releases>)先找到最新版本，然后在最新版本中找到”Assets”并点击来展开内容(如果已展开就不必进行此操作)。在展开的内容中找到对应程序，点击下载即可
-
-## 注意事项（必看）
-
-由于使用的是api，所以未来不知道有哪一天突然失效，如果真的出现了，请立即在“Issues”页面中回复！
-
-如果您在使用本程序的时候出现了下载章节失败的情况，也许并不是api失效了，可能是因为调用api人数过多，导致api暂时关闭，如果遇到了这种情况，请稍后再试，另外，您需要下载的小说api可能会因没有更新所以下载失败。
-
-千万不要想着耍小聪明：“欸，我改一下线程数不就能快速下载了吗？”请打消这种念头！因为这样会加大服务器压力！！！
-
-另外，在使用本程序时，请不要使用任何vpn或网络代理等一切影响网络正常使用的程序！
-
-如果您也没有遇到以上的这种情况，请检查要下载的小说章节数量有多少，不建议大于1500章！(保守估计)
-
->划重点：切记！不能将此程序用于违法用途，例如将下载到的小说进行转载、给不良人员分享此程序使用等。本开发者严禁不支持这样做！！！并且请不要将api进行转载使用，除非您已经与开发者协商过，否则后果自负！下载到的小说仅供自行阅读，看完之后请立即删除文件，以免造成侵权，如果您还是偷尝禁果，需自行承担由此引发的任何法律责任和风险。程序的作者及项目贡献者不对因使用本程序所造成的任何损失、损害或法律后果负责！
+下载内容仅供个人阅读，请勿转载、传播或用于任何侵犯他人权益的行为；因使用本程序产生的任何法律责任由使用者自行承担，作者与贡献者不承担任何损失或后果。
 
 ## 免责声明
 
-  本程序仅供 Rust 网络爬虫技术、网页数据处理及相关研究的学习用途。请勿将其用于任何违反法律法规或侵犯他人权益的活动。
-  
-  使用本程序的用户需自行承担由此引发的任何法律责任和风险。程序的作者及项目贡献者不对因使用本程序所造成的任何损失、损害或法律后果负责。
-  
-  在使用本程序之前，请确保您遵守适用的法律法规以及目标网站的使用政策。如有任何疑问或顾虑，请咨询专业法律顾问。
+本程序仅供 Rust 网络爬虫技术、网页数据处理及相关研究的学习用途。请勿将其用于任何违反法律法规或侵犯他人权益的活动。使用前请确认遵守适用的法律法规以及目标网站的使用政策，如有疑问请咨询专业法律顾问。
 
 ## 感谢
 
-感谢用户选择此程序，如果喜欢可以加star，如果有什么对本程序的建议，请在“Issues”页面提出。您的喜欢就是我更新的最大动力❤️
-
-项目前期 · 感谢原作者Dimily的基础项目
-
-项目前期 · 感谢来自Github用户@helloplhm-qwq的api！
-
-项目前期 · 感谢来自QQ用户@终忆的api！
-
-项目前期 · 感谢来自Github用户@jingluopro的api！！
+- 感谢原作者 Dlmily（<https://github.com/Dlmily>）的基础项目，本程序由此衍生后完全重构
+- 感谢一路以来的用户，欢迎点 Star 与提建议，你们的反馈是我持续更新的最大动力 ❤️

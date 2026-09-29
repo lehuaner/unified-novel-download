@@ -33,4 +33,4 @@
 - [ ] 已阅读/遵循 `MAINTAINING.md` 的 feature 组合约定
 - [ ] 已运行默认路径测试或说明无法运行原因
 - [ ] 已运行默认路径 Clippy 或说明无法运行原因
-- [ ] 如涉及 no-official-api，已运行对应测试/Clippy
+- [ ] 如涉及书旗/七猫源或跨平台产物，已额外验证 musl/android 的 feature 组合
