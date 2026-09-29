@@ -1,0 +1,39 @@
+server:
+  port: 8099
+  address: 0.0.0.0
+application:
+  unidbg:
+    dynarmic: false
+    verbose: false
+    async: false
+fq:
+  api:
+    base-url: https://api5-normal-sinfonlineb.fqnovel.com
+    cookie: store-region=cn-zj; store-region-src=did; install_id=2420480337007787;
+    device-pool:
+      enabled: true
+      size: 5
+spring:
+  application:
+    name: unidbg-boot-server
+  profiles:
+    active: prod
+  task:
+    execution:
+      pool:
+        allow-core-thread-timeout: true
+        core-size: 8
+        keep-alive: 60s
+        max-size: 8
+  redis:
+    host: 127.0.0.1
+    port: 6379
+    password:
+    database: 0
+    timeout: 5000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+        max-wait: -1ms

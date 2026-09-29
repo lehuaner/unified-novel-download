@@ -1,0 +1,20 @@
+# === 构建产物 ===
+target/
+*.jar
+
+# === 说明 ===
+# libmetasec_ml.so / libc++_shared.so / ms_16777218.bin 现直接提交进仓库（约 4.2MB）。
+# 番茄 base.apk 经实验证实签名与章节下载均不需要，已从本项目彻底移除。
+
+# === IDE ===
+.idea/
+*.iml
+.vscode/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === 日志 ===
+*.log
+server_*.log

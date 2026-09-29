@@ -57,16 +57,14 @@ if ($CliArgs) {
 # ============================================================================
 
 ## Java sidecar —— 关键代码已并入本仓库 java-sidecar/。
-## 桌面开发：jar 缺失时由下方 preflight 自动构建；APK/.so 不进仓库，见 tools/fetch_assets.ps1。
-$SIDECAR_DIR    = Join-Path $PSScriptRoot "java-sidecar"
-$JAR_PATH       = Join-Path $SIDECAR_DIR "target\unidbg-boot-server-0.0.1-SNAPSHOT.jar"
-$SIDECAR_ASSETS = Join-Path $SIDECAR_DIR "sidecar-assets"
+## 签名所需的 .so/ms.bin 已随 jar 打包（classpath），运行期无需任何外部资源/APK。
+## 桌面开发：jar 缺失时由下方 preflight 自动构建。
+$SIDECAR_DIR = Join-Path $PSScriptRoot "java-sidecar"
+$JAR_PATH    = Join-Path $SIDECAR_DIR "target\unidbg-boot-server-0.0.1-SNAPSHOT.jar"
 
 ## Java JVM options (unidbg needs more heap for native lib simulation)
-## -Dsidecar.assets.dir：APK 下载与 .so 首启抽取的外部目录（jar 不再内嵌 APK/.so）
 $JAVA_OPTS = @(
-    "-Xms64m", "-Xmx512m",
-    "-Dsidecar.assets.dir=$SIDECAR_ASSETS"
+    "-Xms64m", "-Xmx512m"
 )
 
 ## Sidecar port (must match unidbg_signer_url in app config)
@@ -327,16 +325,6 @@ if (-not (Test-Path $JAR_PATH)) {
     }
 }
 Write-OK "JAR: $JAR_PATH"
-
-# Ensure APK assets —— 签名 .so 由 sidecar 首启从 APK 抽取；APK 不进仓库。
-# 需已设置 SIDECAR_APK_URL 或 SIDECAR_APK_LOCAL，否则仅提示（sidecar 将无法签名）。
-$fetchScript = Join-Path $SIDECAR_DIR "tools\fetch_assets.ps1"
-if (Test-Path $fetchScript) {
-    & $fetchScript
-    if ($LASTEXITCODE -ne 0) {
-        Write-Step "APK 未就位（SIDECAR_APK_URL/LOCAL 未设置）。番茄签名会失败，其余源不受影响。"
-    }
-}
 
 # Check cargo - Get-Command fails on non-ASCII PATH entries (e.g. Chinese username)
 $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
