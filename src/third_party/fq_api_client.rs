@@ -46,6 +46,17 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// 单批正文请求的章节数，可用 `UNIFIED_FQ_BATCH_CHUNK` 覆盖（限制 1..=50）。
+/// 默认 25：与 `build_dynamic_chapter_groups` 的组上限(MAX_DYNAMIC_GROUP_SIZE)对齐，
+/// 使「一个下载组 = 一次 sidecar 往返」，尽量减少 HTTP/签名往返次数。
+/// 调小可让设备轮换/失败重试的粒度更细，但会增加往返数。
+fn fq_batch_chunk() -> usize {
+    crate::base_system::env_first(&["UNIFIED_FQ_BATCH_CHUNK", "TOMATO_FQ_BATCH_CHUNK"])
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(1, 50))
+        .unwrap_or(25)
+}
+
 /// 构建通用 API 参数（30+ 个设备指纹参数）。
 fn build_common_params() -> Vec<(String, String)> {
     let rticket = now_ms().to_string();
@@ -156,8 +167,7 @@ impl FqApiClient {
     }
 
     /// 获取 registerkey 解密密钥（带缓存，5 分钟过期）。
-    #[allow(dead_code)]
-    fn get_decryption_key(&self) -> Result<(String, i64)> {
+    pub(crate) fn get_decryption_key(&self) -> Result<(String, i64)> {
         {
             let cache = self.cached_key.lock().unwrap_or_else(|e| e.into_inner());
             if let Some((ref key, keyver, ts)) = *cache {
@@ -276,13 +286,13 @@ impl FqApiClient {
         }
 
         // 分块请求 sidecar，避免单请求章节过多；命中拒绝/空内容时退避重试，
-        // 让 sidecar 内部 nextDevice() 轮换到新设备。
-        const CHUNK: usize = 8;
+        // 让 sidecar 内部 nextDevice() 轮换到新设备。单批章节数见 fq_batch_chunk()（默认 25）。
+        let chunk = fq_batch_chunk();
         const RETRY: usize = 3;
 
         let mut out = serde_json::Map::new();
         let mut last_err: Option<String> = None;
-        for part in ids.chunks(CHUNK) {
+        for part in ids.chunks(chunk) {
             let mut ok = false;
             for attempt in 0..RETRY {
                 match self.fetch_chapters_via_sidecar(part, book_id) {
