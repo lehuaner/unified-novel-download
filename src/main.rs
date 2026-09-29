@@ -20,10 +20,10 @@ mod book_parser;
 mod download;
 mod network_parser;
 mod prewarm_state;
-#[cfg(feature = "shuqi")]
-mod shuqi;
 #[cfg(feature = "qimao")]
 mod qimao;
+#[cfg(feature = "shuqi")]
+mod shuqi;
 mod third_party;
 mod ui;
 

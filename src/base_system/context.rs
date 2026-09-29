@@ -533,12 +533,33 @@ impl Config {
         candidates.iter().map(PathBuf::from).find(|p| p.exists())
     }
 
+    /// save_path 为空时的默认保存目录兜底：
+    /// 开发环境（cargo run / rustc 测试二进制）使用项目根目录下的 downloads，
+    /// 发布产物（二进制与 config.yml 同目录部署）使用二进制所在目录下的 downloads，
+    /// 避免依赖进程 CWD 导致下载内容散落在仓库根目录或任意启动目录。
     pub fn default_save_dir(&self) -> PathBuf {
         if self.save_path.trim().is_empty() {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            Self::fallback_downloads_dir()
         } else {
             PathBuf::from(&self.save_path)
         }
+    }
+
+    fn fallback_downloads_dir() -> PathBuf {
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(_) => {
+                return std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join("downloads");
+            }
+        };
+        let exe_dir = exe.parent().unwrap_or(Path::new(".")).to_path_buf();
+        // target/<profile>/(deps/)?universal-novel-downloader* → 上溯到项目根
+        if let Some(project_root) = locate_cargo_target_root(&exe_dir) {
+            return project_root.join("downloads");
+        }
+        exe_dir.join("downloads")
     }
 
     pub fn find_existing_status_folder_by_book_id(
@@ -784,6 +805,26 @@ impl Config {
     }
 }
 
+/// 若二进制位于 Cargo 构建输出目录（如 `<proj>/target/debug`、`<proj>/target_smoke/debug/deps`），
+/// 返回项目根 `<proj>`；否则返回 None。
+/// 通过“父目录名以 target 开头且其下存在 Cargo.toml”识别，避免误判普通部署路径。
+fn locate_cargo_target_root(exe_dir: &Path) -> Option<PathBuf> {
+    for dir in exe_dir.ancestors() {
+        let name = dir
+            .file_name()
+            .and_then(OsStr::to_str)?
+            .to_ascii_lowercase();
+        if !name.starts_with("target") {
+            continue;
+        }
+        let project_root = dir.parent()?;
+        if project_root.join("Cargo.toml").is_file() {
+            return Some(project_root.to_path_buf());
+        }
+    }
+    None
+}
+
 fn merge_dir_contents(src: &Path, dst: &Path) -> io::Result<()> {
     merge_dir_contents_at_depth(src, dst, true)
 }
@@ -897,7 +938,30 @@ fn status_downloaded_count(path: &Path) -> usize {
 mod tests {
     use super::{
         Config, OUTPUT_FORMAT_ASK_AFTER_DOWNLOAD, OUTPUT_FORMAT_BULK_TXT, OUTPUT_FORMAT_TXT,
+        locate_cargo_target_root,
     };
+
+    #[test]
+    fn cargo_target_root_detected_only_with_manifest() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project = temp_dir.path().join("proj");
+        let exe_dir = project.join("target").join("debug").join("deps");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::write(project.join("Cargo.toml"), "[package]\n").unwrap();
+        assert_eq!(
+            locate_cargo_target_root(&exe_dir).as_deref(),
+            Some(project.as_path())
+        );
+
+        // 无 Cargo.toml 时不应误判（如发布包目录、用户 Downloads 下的 xxx_target 目录）
+        let orphan = temp_dir
+            .path()
+            .join("downloads")
+            .join("target")
+            .join("debug");
+        std::fs::create_dir_all(&orphan).unwrap();
+        assert_eq!(locate_cargo_target_root(&orphan), None);
+    }
 
     #[test]
     fn status_folder_path_migrates_legacy_folder_when_only_book_name_changes() {

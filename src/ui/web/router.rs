@@ -17,6 +17,18 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route("/assets/app.css", get(routes::index::asset_css))
         .route("/assets/app.js", get(routes::index::asset_js))
         .route("/assets/favicon.ico", get(routes::index::asset_favicon_ico))
+        .route(
+            "/assets/fqnovel.webp",
+            get(routes::index::asset_icon_fqnovel),
+        )
+        .route(
+            "/assets/sqnovel.png",
+            get(routes::index::asset_icon_sqnovel),
+        )
+        .route(
+            "/assets/qmnovel.webp",
+            get(routes::index::asset_icon_qmnovel),
+        )
         .route("/api/login", post(routes::auth::api_login))
         .route("/api/status", get(routes::status::api_status))
         .route("/api/app_update", get(routes::app_update::api_app_update))
@@ -38,6 +50,18 @@ pub(crate) fn build_router(state: AppState) -> Router {
             get(routes::auth::get_config_full).post(routes::auth::set_config_full),
         )
         .route("/api/library", get(routes::library::api_library))
+        .route(
+            "/api/library/books",
+            get(routes::library::api_library_books),
+        )
+        .route(
+            "/api/library/cover",
+            get(routes::library::api_library_cover),
+        )
+        .route(
+            "/api/library/delete",
+            post(routes::library::api_library_delete),
+        )
         .route("/download/*path", get(routes::download::download_file))
         .route("/download-zip/*path", get(routes::download::download_zip))
         .route("/api/search", get(routes::search::api_search))
@@ -45,10 +69,20 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/search-cover",
             get(routes::search_cover::api_search_cover),
         )
+        .route(
+            "/api/search-history",
+            get(routes::search_history::api_search_history_list)
+                .post(routes::search_history::api_search_history_add)
+                .delete(routes::search_history::api_search_history_delete),
+        )
         .route("/api/preview/:book_id", get(routes::preview::api_preview))
         .route(
             "/api/preview/:book_id/cleanup",
             post(routes::preview::api_preview_cleanup),
+        )
+        .route(
+            "/api/preview/:book_id/archive",
+            post(routes::preview::api_preview_archive),
         )
         .route(
             "/api/preview-cover/:key",
@@ -63,6 +97,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
             get(routes::jobs::list_jobs).post(routes::jobs::create_job),
         )
         .route("/api/jobs/:id", delete(routes::jobs::delete_job))
+        .route("/api/jobs/meta", get(routes::jobs::job_meta))
         .route("/api/jobs/:id/cancel", post(routes::jobs::cancel_job))
         .route(
             "/api/jobs/:id/book_name",

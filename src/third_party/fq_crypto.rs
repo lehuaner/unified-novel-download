@@ -42,7 +42,7 @@ fn pkcs7_unpad(data: &[u8]) -> Result<Vec<u8>> {
 fn pkcs7_pad(data: &[u8]) -> Vec<u8> {
     let pad = 16 - (data.len() % 16);
     let mut out = data.to_vec();
-    out.extend(std::iter::repeat(pad as u8).take(pad));
+    out.extend(std::iter::repeat_n(pad as u8, pad));
     out
 }
 

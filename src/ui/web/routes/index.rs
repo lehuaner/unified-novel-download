@@ -56,19 +56,30 @@ pub(crate) async fn asset_js() -> Response {
 }
 
 pub(crate) async fn asset_favicon_ico() -> Response {
-    let mut resp = Response::new(templates::APP_FAVICON_ICO.into());
+    icon_response(templates::APP_FAVICON_ICO, "image/x-icon")
+}
+
+pub(crate) async fn asset_icon_fqnovel() -> Response {
+    icon_response(templates::ICON_FQNOVEL, "image/webp")
+}
+
+pub(crate) async fn asset_icon_sqnovel() -> Response {
+    icon_response(templates::ICON_SQNOVEL, "image/png")
+}
+
+pub(crate) async fn asset_icon_qmnovel() -> Response {
+    icon_response(templates::ICON_QMNOVEL, "image/webp")
+}
+
+fn icon_response(data: &[u8], content_type: &str) -> Response {
+    let mut resp = Response::new(data.to_vec().into());
     *resp.status_mut() = StatusCode::OK;
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("image/x-icon"),
-    );
+    if let Ok(val) = HeaderValue::from_str(content_type) {
+        resp.headers_mut().insert(header::CONTENT_TYPE, val);
+    }
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+        HeaderValue::from_static("public, max-age=86400"),
     );
-    resp.headers_mut()
-        .insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
-    resp.headers_mut()
-        .insert(header::EXPIRES, HeaderValue::from_static("0"));
     resp
 }

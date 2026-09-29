@@ -1,7 +1,13 @@
 pub(crate) const INDEX_HTML_RAW: &str = include_str!("templates/index.html");
 pub(crate) const APP_JS: &str = include_str!("templates/app.js");
 pub(crate) const APP_CSS: &str = include_str!("templates/app.css");
-pub(crate) const APP_FAVICON_ICO: &[u8] = include_bytes!("../../../img/Tomato-downloader-ico.ico");
+pub(crate) const APP_FAVICON_ICO: &[u8] = include_bytes!("../../../img/app.ico");
+
+// 各搜索源图标（用于结果/下载库卡片右上角的来源标志）。
+// 文件名按真实字节类型命名：fqnovel.webp / qmnovel.webp 为 WEBP，sqnovel.png 为 PNG（Content-Type 见 routes/index.rs）。
+pub(crate) const ICON_FQNOVEL: &[u8] = include_bytes!("../../../img/fqnovel.webp");
+pub(crate) const ICON_SQNOVEL: &[u8] = include_bytes!("../../../img/sqnovel.png");
+pub(crate) const ICON_QMNOVEL: &[u8] = include_bytes!("../../../img/qmnovel.webp");
 
 /// 仅当启用 official-api feature 时才注入免费声明。
 /// 未启用时展开为空串，占位符从 HTML 中抹除。

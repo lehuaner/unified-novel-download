@@ -1,6 +1,6 @@
 [package]
 name = "tomato-novel-downloader"
-version = "2.5.0"
+version = "2.6.0"
 edition = "2024"
 description = "Unified novel downloader supporting multiple providers (Tomato, Shuqi)"
 repository = "https://github.com/lehuaner/unified-novel-download"
@@ -35,7 +35,8 @@ clipboard-arboard = ["dep:arboard"]
 docker = []
 
 # 书旗（Shuqi）小说提供商：通过 `sq:<bookId>` 前缀路由，独立于番茄官方 API。
-shuqi = ["dep:md-5"]
+# 搜索走原生网关 native_v3，需 HMAC-SHA1 签名（hmac crate）；目录/正文沿用 md5 签名（md-5）。
+shuqi = ["dep:md-5", "dep:hmac"]
 
 # 七猫（Qimao）小说提供商：通过 `qm:<bookId>` 前缀路由，整本缓存 ZIP 下载。
 qimao = ["dep:md-5"]
@@ -73,6 +74,7 @@ epub-builder = "0.7"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "gzip"] }
 md-5 = { version = "0.10", optional = true }
+hmac = { version = "0.12", optional = true }
 # # tomato-novel-official-api = { git = "https://github.com/zhongbai2333/Tomato-Novel-Official-API.git", optional = true }
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs"] }

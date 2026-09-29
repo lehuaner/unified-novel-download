@@ -21,7 +21,9 @@ use crate::base_system::book_paths;
 use crate::base_system::context::Config;
 #[cfg(feature = "official-api")]
 use crate::base_system::cooldown_retry::fetch_with_cooldown_retry;
-use crate::base_system::download_history::{DownloadHistoryRecord, append_download_history};
+use crate::base_system::download_history::{
+    DownloadHistoryRecord, DownloadMeta, append_download_history,
+};
 use crate::book_parser::book_manager::BookManager;
 use crate::book_parser::finalize_utils;
 use crate::book_parser::parser::ContentParser;
@@ -551,6 +553,21 @@ pub fn download_with_plan_flow(
 
     let mut reporter = make_reporter(config, &chosen_chapters, &pending, progress);
 
+    // 下载完成时写入下载存档的元数据（封面/简介/评分等），供下载库/历史卡片直接展示。
+    let hist_meta = DownloadMeta {
+        description: plan.meta.description.clone(),
+        cover_url: plan
+            .meta
+            .cover_url
+            .clone()
+            .or_else(|| plan.meta.detail_cover_url.clone()),
+        score: plan.meta.score,
+        word_count: plan.meta.word_count,
+        finished: plan.meta.finished,
+        category: plan.meta.category.clone(),
+        read_count_text: plan.meta.read_count_text.clone(),
+    };
+
     loop {
         let book_name = manager.book_name.clone();
         let result = match download_chapters_into_manager(
@@ -576,6 +593,7 @@ pub fn download_with_plan_flow(
                     success,
                     failed,
                     "failed".to_string(),
+                    hist_meta.clone(),
                 ));
                 return Err(e);
             }
@@ -627,6 +645,7 @@ pub fn download_with_plan_flow(
         success,
         failed,
         status.to_string(),
+        hist_meta.clone(),
     ));
 
     finalize_result
@@ -840,7 +859,9 @@ pub(crate) fn download_chapters_into_manager(
 
     #[cfg(not(feature = "official-api"))]
     let result = if config.use_official_api {
-        Err(anyhow!("当前构建模式为 no-official-api，不支持使用官方 API。请重新构建并启用 official-api 特性。"))
+        Err(anyhow!(
+            "当前构建模式为 no-official-api，不支持使用官方 API。请重新构建并启用 official-api 特性。"
+        ))
     } else {
         download_third_party_flow(
             config,
@@ -862,6 +883,8 @@ pub(crate) fn download_chapters_into_manager(
 }
 
 /// 第三方 API 模式下载流程（提取以避免 `#[cfg]` 块之间代码重复）。
+// 参数即流程所需的全部上下文，拆结构体会把简单问题复杂化，这里豁免 lint。
+#[allow(clippy::too_many_arguments)]
 fn download_third_party_flow(
     config: &Config,
     book_id: &str,
@@ -887,7 +910,9 @@ fn download_third_party_flow(
     }
 
     if config.api_endpoints.is_empty() {
-        return Err(anyhow!("use_official_api=false 时，api_endpoints 不能为空（或设置 unidbg_signer_url）"));
+        return Err(anyhow!(
+            "use_official_api=false 时，api_endpoints 不能为空（或设置 unidbg_signer_url）"
+        ));
     }
 
     let probe_chapter_id = pending_chapters
@@ -997,6 +1022,7 @@ fn download_third_party_flow(
 }
 
 /// unidbg 签名 sidecar 模式下载流程。
+#[allow(clippy::too_many_arguments)]
 fn download_unidbg_flow(
     config: &Config,
     book_id: &str,

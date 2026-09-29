@@ -3,7 +3,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -444,7 +444,11 @@ pub(crate) enum LoginLimitDecision {
 impl AuthState {
     /// 从密码 + 已持久化的会话密钥构造 AuthState。
     /// `session_secret` 应由 [`load_or_create_session_secret`] 提供，保证跨服务重启稳定。
-    pub(crate) fn from_password(password: &str, cookie_secure: bool, session_secret: [u8; 32]) -> Self {
+    pub(crate) fn from_password(
+        password: &str,
+        cookie_secure: bool,
+        session_secret: [u8; 32],
+    ) -> Self {
         let mut h = Sha256::new();
         h.update(password.as_bytes());
         let out = h.finalize();
@@ -710,6 +714,14 @@ mod auth_tests {
 
 pub(crate) const RECENT_DONE_JOB_RETENTION_MS: u64 = 2 * 60 * 60 * 1000;
 
+/// 任务表纪元（本进程首次对外提供任务同步的时刻，进程内恒定）。
+/// 前端比对自身记录的纪元，一旦不一致即说明内存任务表已换过一批，
+/// 需丢弃本地增量缓存全量重同步（否则旧任务卡片会成为幽灵）。
+pub(crate) fn jobs_epoch_ms() -> u64 {
+    static EPOCH: OnceLock<u64> = OnceLock::new();
+    *EPOCH.get_or_init(now_ms)
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum JobState {
@@ -726,6 +738,50 @@ impl JobState {
     }
 }
 
+/// 任务自身携带的书籍元数据，供下载库“进行中卡片”与成品卡同构渲染。
+/// 数据来源只有两处：提交任务时卡片携带的封面、本任务 prepare_download_plan 拿到的上游元数据；
+/// 不从其它接口补分，字段缺失即为 None（前端不渲染该项）。
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct JobBookMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cover_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) word_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) chapter_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) finished: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) read_count_text: Option<String>,
+}
+
+/// 任务静态视图（生命周期内基本不变）：与动态进度分开传输，避免 1.5s 轮询重复拉取相同数据。
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct JobStaticView {
+    pub(crate) book_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) author: Option<String>,
+    pub(crate) created_ms: u64,
+    pub(crate) meta: JobBookMeta,
+}
+
+/// 增量同步结果：变化项 + 自游标后被移除的任务 id（墓碑）+ 新游标。
+pub(crate) struct JobSync {
+    pub(crate) changed: Vec<JobInfo>,
+    pub(crate) removed_ids: Vec<u64>,
+    pub(crate) cursor: u64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct JobInfo {
     pub(crate) id: u64,
@@ -737,6 +793,11 @@ pub(crate) struct JobInfo {
     pub(crate) message: Option<String>,
     pub(crate) book_name_options: Option<Vec<BookNameOption>>,
     pub(crate) format_options: Option<Vec<BookNameOption>>,
+    pub(crate) meta: Option<JobBookMeta>,
+    /// 上游元数据是否已写入（prepare 完成）。
+    /// 不能用 meta.is_some() 代替：提交时播种的封面会让 meta 提前存在，
+    /// 前端会过早拉一次静态层并永久标记“已拉”，永远拿不到书名/简介。
+    pub(crate) meta_ready: bool,
     pub(crate) created_ms: u64,
     pub(crate) updated_ms: u64,
 }
@@ -759,13 +820,21 @@ struct JobEntry {
 pub(crate) struct JobStore {
     next_id: AtomicU64,
     inner: Mutex<HashMap<u64, JobEntry>>,
+    /// 墓碑 (job_id, 移除时刻)：增量轮询靠它告知客户端删除条目，否则前端 Map 会残留。
+    removed: Mutex<Vec<(u64, u64)>>,
 }
 
 impl JobStore {
-    pub(crate) fn create(&self, book_id: String) -> JobHandle {
+    pub(crate) fn create(&self, book_id: String, cover_hint: Option<String>) -> JobHandle {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
         let now = now_ms();
         let cancel = Arc::new(AtomicBool::new(false));
+
+        // 提交时卡片带来的封面立刻入库：排队/解析阶段即可显示，无需等 plan。
+        let meta = cover_hint.map(|c| JobBookMeta {
+            cover_url: Some(c),
+            ..Default::default()
+        });
 
         let info = JobInfo {
             id,
@@ -777,6 +846,8 @@ impl JobStore {
             message: None,
             book_name_options: None,
             format_options: None,
+            meta,
+            meta_ready: false,
             created_ms: now,
             updated_ms: now,
         };
@@ -808,8 +879,89 @@ impl JobStore {
 
     pub(crate) fn prune_done_older_than(&self, retention_ms: u64) {
         let cutoff = now_ms().saturating_sub(retention_ms);
-        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        g.retain(|_, e| !e.info.state.is_auto_prunable() || e.info.updated_ms >= cutoff);
+        let mut dead: Vec<u64> = Vec::new();
+        {
+            let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            g.retain(|id, e| {
+                let keep = !e.info.state.is_auto_prunable() || e.info.updated_ms >= cutoff;
+                if !keep {
+                    dead.push(*id);
+                }
+                keep
+            });
+        }
+        self.record_removed(dead);
+    }
+
+    /// 增量同步：只返回 updated_ms 严格大于游标的任务，外加该时刻后被移除的任务（墓碑）。
+    /// 无变化时 items 为空，1.5s 轮询的 payload 接近零，不重复传输相同数据。
+    pub(crate) fn sync_since(&self, since_ms: u64) -> JobSync {
+        let now = now_ms();
+        let changed: Vec<JobInfo> = {
+            let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let mut v: Vec<JobInfo> = g
+                .values()
+                .filter(|e| e.info.updated_ms > since_ms)
+                .map(|e| e.info.clone())
+                .collect();
+            v.sort_by(|a, b| {
+                b.updated_ms
+                    .cmp(&a.updated_ms)
+                    .then_with(|| b.id.cmp(&a.id))
+            });
+            v
+        };
+        let removed_ids = {
+            let mut r = self.removed.lock().unwrap_or_else(|e| e.into_inner());
+            r.retain(|(_, ms)| now.saturating_sub(*ms) <= RECENT_DONE_JOB_RETENTION_MS);
+            r.iter()
+                .filter(|(_, ms)| *ms > since_ms)
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        JobSync {
+            changed,
+            removed_ids,
+            cursor: now,
+        }
+    }
+
+    /// 批量取任务静态视图：仅返回元数据已就绪（meta 已写入）的任务，
+    /// 未就绪的不返回，前端下个周期再取（因此不会重复拉到相同内容）。
+    pub(crate) fn static_views(&self, ids: &[u64]) -> Vec<(u64, JobStaticView)> {
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        ids.iter()
+            .filter_map(|id| {
+                let info = &g.get(id)?.info;
+                // 未就绪（只有播种封面）时不返回，前端下个周期再取。
+                if !info.meta_ready {
+                    return None;
+                }
+                let meta = info.meta.clone()?;
+                Some((
+                    *id,
+                    JobStaticView {
+                        book_id: info.book_id.clone(),
+                        title: info.title.clone(),
+                        author: info.author.clone(),
+                        created_ms: info.created_ms,
+                        meta,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    fn record_removed(&self, ids: Vec<u64>) {
+        if ids.is_empty() {
+            return;
+        }
+        let now = now_ms();
+        let mut r = self.removed.lock().unwrap_or_else(|e| e.into_inner());
+        r.extend(ids.into_iter().map(|id| (id, now)));
     }
 
     /// 返回当前处于 Queued 或 Running 状态的任务数量，用于并发限制。
@@ -833,6 +985,21 @@ impl JobStore {
         self.update(id, |j| {
             j.title = title;
             j.author = author;
+        });
+    }
+
+    /// 写入本任务上游元数据；已有封面（提交时卡片携带）且新值无封面时保留原封面，
+    /// 避免出现“解析完反而没封面”的回退。
+    pub(crate) fn set_book_meta(&self, id: u64, meta: JobBookMeta) {
+        self.update(id, |j| {
+            j.meta_ready = true;
+            j.meta = Some(match j.meta.take() {
+                Some(prev) if prev.cover_url.is_some() && meta.cover_url.is_none() => JobBookMeta {
+                    cover_url: prev.cover_url,
+                    ..meta
+                },
+                _ => meta,
+            });
         });
     }
 
@@ -885,6 +1052,7 @@ impl JobStore {
         let Some(mut e) = g.remove(&id) else {
             return false;
         };
+        drop(g);
         e.cancel.store(true, Ordering::Relaxed);
         if let Some(tx) = e.book_name_sender.take() {
             let _ = tx.send(None);
@@ -892,6 +1060,7 @@ impl JobStore {
         if let Some(tx) = e.format_sender.take() {
             let _ = tx.send(None);
         }
+        self.record_removed(vec![id]);
         true
     }
 
@@ -900,12 +1069,14 @@ impl JobStore {
         let Some(mut e) = g.remove(&id) else {
             return false;
         };
+        drop(g);
         if let Some(tx) = e.book_name_sender.take() {
             let _ = tx.send(None);
         }
         if let Some(tx) = e.format_sender.take() {
             let _ = tx.send(None);
         }
+        self.record_removed(vec![id]);
         true
     }
 

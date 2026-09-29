@@ -114,52 +114,55 @@ body {
   color: var(--text-main);
   line-height: 1.6;
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
 
-/* ===== Sidebar ===== */
+/* ===== Top tab bar (原侧边栏改为顶部标签页) ===== */
 .sidebar {
-  width: var(--sidebar-width);
+  width: 100%;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   display: flex;
-  flex-direction: column;
-  position: fixed;
+  flex-direction: row;
+  align-items: center;
+  position: sticky;
   top: 0;
-  left: 0;
-  height: 100vh;
   z-index: 100;
-  overflow-y: auto;
+  gap: 8px;
 }
 
 .brand {
-  padding: 20px 16px;
+  padding: 12px 16px;
   font-size: 1.05rem;
   font-weight: 700;
   color: var(--primary);
-  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   gap: 10px;
   white-space: nowrap;
 }
 
+.brand-icon { border-radius: 6px; display: block; flex: 0 0 auto; }
+
 .nav {
   display: flex;
-  flex-direction: column;
-  padding: 12px 8px;
-  gap: 2px;
+  flex-direction: row;
+  padding: 8px;
+  gap: 6px;
   flex: 1;
+  overflow-x: auto;
 }
 
 .nav a {
   text-decoration: none;
   color: var(--text-secondary);
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 8px;
   font-size: 0.9rem;
   font-weight: 500;
+  white-space: nowrap;
   transition: background 0.15s, color 0.15s;
   display: flex;
   align-items: center;
@@ -183,11 +186,11 @@ body {
 }
 .nav a.active svg { opacity: 1; }
 
-/* Theme toggle in sidebar */
+/* Theme toggle in top bar */
 .sidebar-footer {
-  padding: 12px 8px;
-  border-top: 1px solid var(--border);
+  padding: 8px;
 }
+.sidebar-footer .theme-toggle { width: auto; }
 
 .free-notice {
   margin-top: 10px;
@@ -237,10 +240,8 @@ body {
 /* ===== Main Content ===== */
 .main-content {
   flex: 1;
-  margin-left: var(--sidebar-width);
-  padding: 28px 32px;
-  max-width: 1100px;
-  min-height: 100vh;
+  margin-left: 0;
+  padding: 20px 24px;
 }
 
 /* ===== Sections ===== */
@@ -365,7 +366,7 @@ textarea:focus {
 #q {
   max-width: none;
   font-size: 0.95rem;
-  padding: 10px 14px;
+  padding: 10px 40px 10px 14px;
 }
 
 input[type="checkbox"] {
@@ -550,13 +551,17 @@ button.success {
   color: #fff;
 }
 
-/* ===== Library Highlight ===== */
-.lib-highlight td {
-  animation: lib-highlight-fade 3s ease-out;
+/* ===== Library Highlight（下载库跳转后一次性 outline 高亮，不与 hover 阴影/背景过渡冲突，避免闪烁） ===== */
+.book-card.lib-highlight {
+  outline-style: solid;
+  outline-width: 3px;
+  outline-offset: 2px;
+  outline-color: transparent;
+  animation: lib-highlight-fade 1.6s ease-out;
 }
 @keyframes lib-highlight-fade {
-  0%, 30% { background: rgba(46, 204, 113, 0.25); }
-  100% { background: transparent; }
+  0%, 40% { outline-color: var(--success); }
+  100% { outline-color: transparent; }
 }
 
 /* ===== Modals ===== */
@@ -773,6 +778,16 @@ button.success {
   align-items: stretch;
 }
 
+.search-card { padding: 10px 12px; margin-bottom: 20px; }
+.search-input-wrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
+.search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text-muted); cursor: pointer; border-radius: 50%; padding: 0; }
+.search-clear:hover { color: var(--text-main); background: var(--surface-hover); }
+.search-clear.hidden { display: none; }
+.search-clear svg { pointer-events: none; }
+#searchHint:empty { display: none; }
+.search-form { gap: 8px; }
+.search-submit { width: 46px; padding: 0; justify-content: center; flex: 0 0 auto; margin: 1px 0; }
+
 .link-primary {
   margin-right: 8px;
   color: var(--primary);
@@ -914,7 +929,6 @@ button.success {
   .sidebar {
     width: 100%;
     height: auto;
-    position: static;
     border-right: none;
     border-bottom: 1px solid var(--border);
     flex-direction: row;
@@ -978,6 +992,7 @@ button.success {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .chip:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+#searchHistory .chip { font-size: 0.78rem; padding: 4px 10px; border-radius: 14px; }
 .recent-list { display: flex; flex-direction: column; gap: 2px; }
 .recent-item { display: flex; align-items: baseline; gap: 10px; padding: 6px 8px; border-radius: 8px; }
 .recent-item:hover { background: var(--primary-light); }
@@ -989,9 +1004,214 @@ button.success {
 .link-primary { color: var(--primary); text-decoration: none; font-size: 0.85rem; }
 .link-primary:hover { text-decoration: underline; }
 
-/* ===== 移动端：品牌仅显示图标 ===== */
+/* ===== 书籍卡片网格 ===== */
+.tag-red { background: rgba(231, 76, 60, 0.12); color: var(--danger); }
+.book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 4px; }
 @media (max-width: 768px) {
-  .brand .brand-text { display: none; }
-  .brand { padding: 12px 14px; gap: 0; }
+  body.grid-cols-1 .book-grid { grid-template-columns: 1fr; }
+  body.grid-cols-2 .book-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* 顶部标签页与列表头部/尾部 */
+.search-meta { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.search-progress { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.search-progress.hidden { display: none; }
+.search-meta .search-counts { margin-bottom: 0; }
+.list-head { display: flex; justify-content: flex-end; align-items: center; margin: 2px 0 6px; }
+.list-more { display: flex; justify-content: flex-end; margin-top: 10px; }
+.lib-col-toggle { margin-left: auto; }
+.colToggle { display: inline-flex; align-items: center; justify-content: center; padding: 4px 7px; }
+.colToggle svg { pointer-events: none; }
+/* 列数切换仅窄屏可见；宽屏列数由屏宽(auto-fill)决定 */
+@media (min-width: 769px) { .colToggle { display: none !important; } }
+.book-grid.compact { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.book-card { position: relative; display: flex; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); min-width: 0; transition: border-color .15s; }
+.book-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: var(--shadow); opacity: 0; transition: opacity .15s ease; pointer-events: none; }
+.book-card:hover { border-color: var(--primary); }
+.book-card:hover::after { opacity: 1; }
+.book-card-cover { width: 56px; height: 80px; object-fit: cover; border-radius: 6px; background: var(--input-bg); flex: 0 0 auto; }
+.book-card-cover.cover-failed { display: flex; align-items: center; justify-content: center; font-size: 1.6rem; font-weight: 700; color: var(--text-muted); }
+.book-card-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.book-card-title { font-weight: 700; font-size: .95rem; color: var(--text-main); line-height: 1.3; display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+.book-card-title-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.book-card-badges { display: inline-flex; gap: 4px; margin-left: auto; align-items: center; flex: 0 0 auto; }
+.src-badge { height: 18px; width: 18px; object-fit: contain; border-radius: 4px; display: inline-block; vertical-align: middle; flex: 0 0 auto; }
+.book-card-cover-box { position: relative; flex: 0 0 auto; }
+.update-badge { display: inline-flex; align-items: center; height: 15px; background: #27ae60; color: #fff; font-size: .6rem; font-weight: 600; padding: 0 6px; border-radius: 5px; white-space: nowrap; }
+.book-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 1px; font-size: .8rem; color: var(--text-muted); }
+/* 卡片标签（作者下方 meta 行）：与分类同区，不挤占标题行 */
+.book-card-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.book-card-meta .tag {
+  font-size: .72rem;
+  font-weight: 500;
+  padding: 0 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+/* 内容品类标识（听书 / 短剧 / 漫剧）：与普通运营标签区分，用强调色描边 */
+.book-card-meta .tag.tag-kind {
+  color: #4f46e5;
+  border-color: rgba(79, 70, 229, 0.45);
+  font-weight: 600;
+}
+[data-theme="dark"] .book-card-meta .tag.tag-kind {
+  color: #a5b4fc;
+  border-color: rgba(165, 180, 252, 0.45);
+}
+/* “筛选 ▾”展开指示：展开态箭头翻转 180°（按钮可能独占一行，需有明确开合反馈） */
+.s-filter-toggle .sf-caret { display: inline-block; margin-left: 2px; transition: transform .15s ease; }
+.s-filter-toggle.active .sf-caret { transform: rotate(180deg); }
+/* 预览弹窗：网页元数据缺失（番茄详情页 404 / 抓取失败）告警条 */
+.preview-meta-warn {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: .82rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: rgba(255, 179, 0, 0.10);
+  border: 1px solid rgba(255, 165, 0, 0.38);
+}
+.book-card-author { display: flex; align-items: center; min-width: 0; font-size: .82rem; font-weight: 400; color: var(--text-secondary); line-height: 1.3; }
+.book-card-author-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.book-card-score { color: var(--warning); font-weight: 600; }
+.book-card-extra { color: var(--text-muted); }
+.book-card-desc { font-size: .82rem; line-height: 1.45; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.book-card-desc-empty { color: var(--text-muted); font-style: italic; }
+.book-card-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding-top: 6px; }
+.book-card-foot-left { display: inline-flex; align-items: flex-end; min-width: 0; }
+.book-card-id { font-size: .72rem; background: var(--code-bg); color: var(--code-color); padding: 1px 6px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%; }
+.book-card-foot .book-card-score { flex: 0 0 auto; }
+/* 整卡可点预览 */
+.book-card[data-bookid] { cursor: pointer; }
+.book-card[data-bookid]:hover { border-color: var(--primary); }
+/* 卡片右下操作区（下载/删除图标按钮，右对齐） */
+.book-card-actions { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-secondary); cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.icon-btn:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+.icon-btn.danger:hover { background: rgba(231, 76, 60, 0.12); color: var(--danger); border-color: var(--danger); }
+.icon-btn svg { pointer-events: none; }
+.grid-empty { grid-column: 1 / -1; padding: 24px; text-align: center; color: var(--text-muted); font-size: .9rem; }
+
+/* 搜索命中高亮 */
+mark { background: rgba(255, 200, 0, 0.40); color: inherit; padding: 0 2px; border-radius: 3px; }
+[data-theme="dark"] mark { background: rgba(255, 200, 0, 0.28); }
+
+/* ===== 文件卡片（下载库·文件库） ===== */
+.file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 4px; }
+.file-card { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); min-width: 0; transition: box-shadow .15s, border-color .15s; }
+.file-card:hover { box-shadow: var(--shadow); border-color: var(--primary); }
+.file-card-icon { font-size: 1.6rem; line-height: 1; flex: 0 0 auto; }
+.file-card-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 auto; }
+.file-card-name { font-weight: 600; font-size: .9rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .78rem; color: var(--text-muted); }
+.file-card-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.file-dl-btn { display: inline-block; text-align: center; padding: 5px 12px; border-radius: 8px; font-size: .82rem; font-weight: 600; text-decoration: none; border: 1px solid var(--border); background: var(--btn-default-bg); color: var(--text-main); cursor: pointer; white-space: nowrap; transition: background .15s, color .15s; }
+.file-dl-btn:hover { background: var(--btn-default-hover); }
+.file-dl-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.file-dl-btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+
+/* ===== 下载记录时钟（下拉） ===== */
+.clock-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.clock-details > summary { list-style: none; }
+.clock-details > summary::-webkit-details-marker { display: none; }
+.clock-summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; flex-wrap: wrap; }
+.clock-summary:hover { background: var(--surface-hover); }
+.clock-icon { color: var(--primary); flex: 0 0 auto; }
+.clock-title { font-weight: 700; font-size: .98rem; color: var(--text-main); }
+.clock-badge { background: var(--primary); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: .74rem; font-weight: 700; min-width: 20px; text-align: center; }
+.clock-spacer { flex: 1 1 auto; }
+.clock-filter { width: 160px; padding: 5px 10px; font-size: .82rem; border: 1px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text-main); }
+.clock-caret { color: var(--text-muted); transition: transform .18s ease; flex: 0 0 auto; }
+.clock-details[open] > .clock-summary .clock-caret { transform: rotate(180deg); }
+.clock-panel { padding: 4px 14px 14px; border-top: 1px solid var(--border-light); }
+.clock-sub { margin-top: 12px; }
+.clock-sub-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .82rem; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: none; }
+.clock-sub-tools { display: inline-flex; align-items: center; gap: 12px; font-weight: 400; }
+.clock-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: .78rem; color: var(--text-muted); cursor: pointer; }
+
+/* ===== mini 卡片（缩略图+书名+作者） ===== */
+.mini-card { display: flex; gap: 10px; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-sm); min-width: 0; transition: box-shadow .15s, border-color .15s; }
+.mini-card:hover { box-shadow: var(--shadow); border-color: var(--primary); }
+.mini-cover { width: 44px; height: 60px; object-fit: cover; border-radius: 6px; background: var(--input-bg); flex: 0 0 auto; }
+.mini-cover.cover-failed { display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 700; color: var(--text-muted); }
+.mini-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
+.mini-title { font-weight: 700; font-size: .9rem; color: var(--text-main); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-author { font-size: .8rem; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .74rem; color: var(--text-muted); margin-top: 2px; }
+.mini-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.sm.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+.sm.ghost:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
+
+/* ===== 进行中任务卡片（复用 book-card 结构，仅底栏左侧换成进度条） ===== */
+.book-card.job-card.state-running,
+.book-card.job-card.state-queued { border-color: var(--info); }
+.book-card.job-card.state-failed,
+.book-card.job-card.state-partial,
+.book-card.job-card.needscfg { border-color: var(--warning); }
+/* foot 左侧：进度条 + 计数文本纵向排列，与右侧 30px 图标按钮底对齐 */
+.job-foot { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; gap: 3px; }
+.job-progress { display: block; height: 6px; background: var(--input-bg); border-radius: 999px; overflow: hidden; }
+.job-progress-fill { display: block; height: 100%; background: linear-gradient(90deg, var(--info), var(--primary)); border-radius: 999px; transition: width .4s ease; }
+.job-progress-text { font-size: .72rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 排队/待配置：进度未知，整条做缓慢流动的不确定态（只动 transform，不触发重排） */
+.job-progress.indeterminate .job-progress-fill { width: 35% !important; animation: jobIndeterminate 1.15s linear infinite; }
+@keyframes jobIndeterminate { from { transform: translateX(-100%); } to { transform: translateX(330%); } }
+/* 下载中：轻微呼吸（纯 opacity，不影响布局） */
+.book-card.job-card.state-running .job-progress-fill { animation: jobPulse 1.4s ease-in-out infinite alternate; }
+@keyframes jobPulse { from { opacity: .78; } to { opacity: 1; } }
+.icon-btn.warning:hover { background: rgba(243, 156, 18, 0.12); color: var(--warning); border-color: var(--warning); }
+.icon-btn.ghost { background: transparent; }
+
+/* ===== 搜索源筛选 chips ===== */
+.provider-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.provider-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 0; }
+.provider-filter-label { font-size: .82rem; color: var(--text-muted); font-weight: 600; }
+.provider-chip { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-hover); cursor: pointer; user-select: none; transition: all .15s; }
+.provider-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+.chip-ico { width: 26px; height: 26px; object-fit: contain; border-radius: 4px; pointer-events: none; }
+.provider-chip:hover { border-color: var(--primary); }
+.provider-chip.checked { background: var(--primary-light); border-color: var(--primary); }
+/* 隐藏复选框自带的焦点环会在 chip 外圈残留一个"选中框"（点击取消选中后仍不消失），必须清除；
+   键盘可达性改由 label 上的 :focus-visible 单独呈现（仅键盘聚焦时显示，鼠标点击不出现）。 */
+.provider-chip input:focus { outline: none; }
+.provider-chip:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.search-counts { font-size: .82rem; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.count-item { display: inline-flex; align-items: center; gap: 4px; }
+.count-ico { width: 16px; height: 16px; object-fit: contain; border-radius: 3px; }
+.count-sep { color: var(--text-muted); margin: 0 2px; }
+
+/* ===== 番茄搜索工具栏：分类 tab + 筛选器 + 分页 ===== */
+.search-toolbar { display: flex; flex-direction: column; gap: 8px; margin: 0 0 6px; }
+.search-toolbar .stabs { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding-bottom: 1.5px; }
+@media (pointer: coarse) {
+  .search-toolbar .stabs { scrollbar-width: none; -ms-overflow-style: none; }
+  .search-toolbar .stabs::-webkit-scrollbar { display: none; }
+}
+.search-toolbar .stab { flex: 0 0 auto; }
+.search-toolbar .s-filter-toggle { flex: 0 0 auto; margin-left: 4px; }
+.search-toolbar .stab {
+  border: 1px solid var(--border); background: var(--surface-hover); color: var(--text-secondary);
+  border-radius: 999px; padding: 5px 14px; font-size: .84rem; cursor: pointer; transition: all .15s;
+}
+.search-toolbar .stab:hover { border-color: var(--primary); color: var(--primary); }
+.search-toolbar .stab.active { background: var(--primary); border-color: var(--primary); color: #fff; font-weight: 600; }
+.search-toolbar .srow { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.search-toolbar .srow-name { flex: 0 0 auto; min-width: 3.5em; color: var(--text-muted); font-size: .8rem; line-height: 28px; }
+.search-toolbar .srow-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.search-toolbar .sfilter {
+  border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+  border-radius: 8px; padding: 3px 10px; font-size: .8rem; cursor: pointer; transition: all .15s;
+}
+.search-toolbar .sfilter:hover { border-color: var(--primary); color: var(--primary); }
+.search-toolbar .sfilter.active { background: var(--primary-light); border-color: var(--primary); color: var(--primary); font-weight: 600; }
+.search-toolbar .s-more { margin-left: 3.5em; }
+.mm-info { color: var(--text-muted); font-size: .72rem; flex-basis: 100%; margin-top: 2px; }
+
+/* ===== 移动端：品牌紧凑（保留名称） ===== */
+@media (max-width: 768px) {
+  .brand { padding: 12px 14px; }
 }
 

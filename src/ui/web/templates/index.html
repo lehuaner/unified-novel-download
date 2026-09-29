@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tomato Novel Downloader</title>
+    <title>Unified Novel Downloader</title>
     <link rel="icon" type="image/x-icon" href="/assets/favicon.ico" />
     <link rel="stylesheet" href="/assets/app.css" />
 </head>
@@ -12,63 +12,22 @@
 <body>
     <aside class="sidebar">
         <div class="brand">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-            </svg>
+            <img class="brand-icon" src="/assets/favicon.ico" alt="logo" width="24" height="24" />
             <span class="brand-text">Novel DL</span>
         </div>
         <nav class="nav">
-            <a href="#status">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                </svg>
-                状态
-            </a>
             <a href="#search" class="active">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="11" cy="11" r="8" />
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
-                搜索/下载
-            </a>
-            <a href="#jobs">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                任务
-            </a>
-            <a href="#history">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M3 3v5h5" />
-                    <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
-                    <path d="M12 7v5l3 3" />
-                </svg>
-                下载历史
-            </a>
-            <a href="#updates">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="23 4 23 10 17 10" />
-                    <polyline points="1 20 1 14 7 14" />
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                </svg>
-                更新
+                搜索
             </a>
             <a href="#library">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
                 下载库
-            </a>
-            <a href="#config">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="3" />
-                    <path
-                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-                配置
             </a>
         </nav>
         <div class="sidebar-footer">
@@ -84,70 +43,32 @@
     </aside>
 
     <main class="main-content">
-        <!-- ===== Status ===== -->
-        <section id="status" class="section">
-            <h2>状态概览</h2>
-            <div class="card">
-                <div class="row"><span class="k">版本</span><code id="version">loading</code></div>
-                <div class="row"><span class="k">预热</span><code id="prewarm">loading</code></div>
-                <div class="row"><span class="k">保存目录</span><code id="saveDir">loading</code></div>
-                <div class="row"><span class="k">监听地址</span><code id="bind">see console</code></div>
-                <div class="row"><span class="k">锁定模式</span><code id="locked">loading</code></div>
-                <div class="row mt-16">
-                    <button id="appUpdateCheck" type="button" class="primary">检查程序更新</button>
-                    <span id="appUpdateHint" class="k"></span>
-                </div>
-            </div>
-
-            {{FREE_NOTICE_MOBILE}}
-
-            <div id="iidWarningBanner" class="card hidden card-accent-left">
-                <h3>IID 注册失败：请检查网络拦截</h3>
-                <div id="iidWarningBannerBody" class="small text-pre-wrap"></div>
-            </div>
-
-            <div id="appUpdateBanner" class="card hidden card-accent-left">
-                <h3>发现新版本</h3>
-                <div class="row"><span class="k">最新版本</span><code id="appUpdateLatest">loading</code></div>
-                <div class="row mt-12">
-                    <a id="appUpdateLink" href="#" target="_blank" rel="noopener" class="link-primary">打开
-                        Release</a>
-                    <button id="appSelfUpdate" type="button" class="primary sm">执行自更新</button>
-                    <button id="appUpdateDismiss" type="button" class="sm">不再提醒</button>
-                </div>
-                <div id="appUpdateBody" class="small mt-12 text-pre-wrap"></div>
-
-                <div id="selfUpdateProgressWrap" class="hidden mt-12">
-                    <div class="row mb-8">
-                        <span class="k">自更新进度</span>
-                        <code id="selfUpdateStage">idle</code>
-                        <span id="selfUpdateMessage" class="small"></span>
-                    </div>
-                    <div class="progressTrack">
-                        <div id="selfUpdateProgressBar" class="progressFill progress-zero"></div>
-                    </div>
-                    <div class="small mt-6" id="selfUpdatePercent">0%</div>
-                </div>
-            </div>
-        </section>
-
         <!-- ===== Search ===== -->
         <section id="search" class="section active">
-            <h2>搜索/下载</h2>
-            <div class="card">
-                <form id="searchForm" class="form-inline-stretch">
-                    <input type="text" id="q" name="q" placeholder="输入关键词、Book ID 或链接…" autocomplete="off" aria-label="搜索关键词、Book ID 或链接" title="搜索关键词、Book ID 或链接" />
-                    <button type="submit" class="primary">搜索/下载</button>
+            <div class="card search-card">
+                <form id="searchForm" class="form-inline-stretch search-form">
+                    <div class="search-input-wrap">
+                        <input type="text" id="q" name="q" placeholder="输入关键词、Book ID 或链接…" autocomplete="off" aria-label="搜索关键词、Book ID 或链接" title="搜索关键词、Book ID 或链接" />
+                        <button type="button" id="searchClear" class="search-clear hidden" title="清空" aria-label="清空"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    </div>
+                    <button type="submit" class="primary search-submit" title="搜索" aria-label="搜索"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
                 </form>
-                <div id="searchHint" class="k mt-8"></div>
-                <div id="searchProgress" class="k mt-8 hidden">
-                    <span class="spinner"></span>
-                    <span id="searchProgressText">搜索中...</span>
+                <div class="provider-row">
+                    <div id="providerFilter" class="provider-filter" role="group" aria-label="搜索源筛选">
+                        <label class="provider-chip checked" title="番茄"><input type="checkbox" value="fanqie" checked /><img class="chip-ico" src="/assets/fqnovel.webp" alt="番茄" /></label>
+                        <label class="provider-chip checked" title="书旗"><input type="checkbox" value="shuqi" checked /><img class="chip-ico" src="/assets/sqnovel.png" alt="书旗" /></label>
+                        <label class="provider-chip checked" title="七猫"><input type="checkbox" value="qimao" checked /><img class="chip-ico" src="/assets/qmnovel.webp" alt="七猫" /></label>
+                    </div>
+                    <div class="search-meta">
+                        <div id="searchProgress" class="search-progress hidden"><span class="spinner"></span><span id="searchProgressText">搜索中...</span></div>
+                        <div id="searchCounts" class="search-counts hidden"></div>
+                    </div>
                 </div>
+                <div id="searchHint" class="k mt-8"></div>
             </div>
 
             <!-- ===== 首页面板：搜索记录 + 最近下载 ===== -->
-            <div id="homePanels" class="card home-panels">
+            <div id="homePanels" class="home-panels">
                 <div class="home-block">
                     <div class="home-block-head">
                         <span class="home-block-title">搜索记录</span>
@@ -160,221 +81,33 @@
                 <div class="home-block">
                     <div class="home-block-head">
                         <span class="home-block-title">最近下载</span>
-                        <a href="#library" class="link-primary">打开下载库</a>
                     </div>
-                    <div id="recentDownloads" class="recent-list">
+                    <div id="recentDownloads" class="book-grid recent-grid">
                         <span class="k">加载中…</span>
                     </div>
                 </div>
             </div>
 
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th class="col-cover">封面</th>
-                            <th>书名</th>
-                            <th>作者</th>
-                            <th>来源</th>
-                            <th>Book ID</th>
-                            <th class="col-action-sm">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="searchResults">
-                        <tr class="empty-row">
-                            <td colspan="6">输入关键词开始搜索</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <div id="searchToolbar" class="search-toolbar hidden"></div>
+            <div class="list-head hidden"><button type="button" class="sm ghost colToggle" title="切换列数" aria-label="切换列数"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"></rect><rect x="14" y="4" width="7" height="16" rx="1"></rect></svg></button></div>
+            <div id="searchResults" class="book-grid hidden"></div>
+            <div id="listMore" class="list-more hidden"></div>
         </section>
 
-        <!-- ===== Jobs ===== -->
-        <section id="jobs" class="section">
-            <h2>下载任务</h2>
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Job ID</th>
-                            <th>书名</th>
-                            <th>状态</th>
-                            <th>进度</th>
-                            <th class="col-action-sm">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="jobsBody">
-                        <tr class="empty-row">
-                            <td colspan="5">暂无任务</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- ===== History ===== -->
-        <section id="history" class="section">
-            <h2>下载历史</h2>
-            <div class="card">
-                <div class="row mb-0">
-                    <input id="historyKeyword" type="text" placeholder="按书名/作者/ID过滤" class="max-w-280" aria-label="按书名、作者或 ID 过滤历史记录" title="按书名、作者或 ID 过滤历史记录" />
-                    <button id="historyRefresh" type="button" class="primary">刷新历史</button>
-                    <span id="historyHint" class="k">loading</span>
-                </div>
-            </div>
-
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>时间</th>
-                            <th>书名</th>
-                            <th>作者</th>
-                            <th>Book ID</th>
-                            <th>进度</th>
-                            <th>状态</th>
-                        </tr>
-                    </thead>
-                    <tbody id="historyBody">
-                        <tr class="empty-row">
-                            <td colspan="6">加载中…</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- ===== Updates ===== -->
-        <section id="updates" class="section">
-            <h2>更新小说</h2>
-            <div class="card">
-                <div class="row mb-0">
-                    <button id="updatesRefresh" type="button" class="primary">扫描更新</button>
-                    <span id="updatesHint" class="k">loading</span>
-                </div>
-            </div>
-
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>书名</th>
-                            <th>Book ID</th>
-                            <th>本地</th>
-                            <th>远端</th>
-                            <th>新章节</th>
-                            <th>失败</th>
-                            <th class="col-action-sm">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="updatesBody">
-                        <tr class="empty-row">
-                            <td colspan="7">加载中…</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
-
-        <!-- ===== Library ===== -->
+        <!-- ===== Library（下载成功的小说 + 进行中任务卡片 + 可更新标记） ===== -->
         <section id="library" class="section">
-            <h2>下载库</h2>
-            <div class="card">
-                <div class="row mb-0">
-                    <span class="k">当前路径</span>
-                    <code id="libPath">/</code>
-                    <button id="libBack" type="button" class="sm">返回上级</button>
-                    <span id="libHint" class="k">loading</span>
-                </div>
+            <div class="row mb-0 lib-toolbar">
+                <span class="home-block-title">已下载小说</span>
+                <input id="libFilter" type="text" placeholder="按书名过滤" class="clock-filter" aria-label="过滤下载库" title="按书名过滤" />
+                <button id="libRefresh" type="button" class="sm">刷新</button>
+                <span id="libHint" class="k"></span>
+                <button type="button" class="sm ghost colToggle lib-col-toggle" title="切换列数" aria-label="切换列数"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="1"></rect><rect x="14" y="4" width="7" height="16" rx="1"></rect></svg></button>
             </div>
-
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>文件名</th>
-                            <th>大小</th>
-                            <th>修改时间</th>
-                            <th class="col-action-md">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="libraryBody">
-                        <tr class="empty-row">
-                            <td colspan="4">加载中…</td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div id="libraryBooks" class="book-grid">
+                <span class="k">加载中…</span>
             </div>
         </section>
 
-        <!-- ===== Config ===== -->
-        <section id="config" class="section">
-            <h2>配置</h2>
-
-            <div class="config-tabs">
-                <button class="config-tab active" data-tab="quick">快捷配置</button>
-                <button class="config-tab" data-tab="full">完整配置</button>
-                <button class="config-tab" data-tab="yaml">YAML 编辑</button>
-            </div>
-
-            <!-- Quick Config Panel -->
-            <div id="configPanelQuick" class="config-panel active">
-                <div class="card">
-                    <form id="configForm">
-                        <div class="config-field">
-                            <label class="field-label" for="cfgNovelFormat">小说格式</label>
-                            <select id="cfgNovelFormat" aria-label="小说格式" title="小说格式">
-                                <option value="txt">txt</option>
-                                <option value="epub">epub</option>
-                                <option value="pdf">pdf</option>
-                                <option value="bulk_txt">散装文件</option>
-                                <option value="ask_after_download">下载后选择</option>
-                            </select>
-                        </div>
-                        <div class="config-field">
-                            <label class="field-label" for="cfgEnableAudiobook">生成有声书</label>
-                            <input id="cfgEnableAudiobook" type="checkbox" aria-label="生成有声书" title="生成有声书" />
-                        </div>
-                        <div class="config-field">
-                            <label class="field-label" for="cfgAudiobookFormat">有声格式</label>
-                            <select id="cfgAudiobookFormat" aria-label="有声格式" title="有声格式">
-                                <option value="mp3">mp3</option>
-                                <option value="wav">wav</option>
-                            </select>
-                        </div>
-                        <div class="row mt-18 mb-0">
-                            <button type="submit" class="primary">保存</button>
-                            <span id="configMsg" class="k"></span>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <!-- Full Config Panel -->
-            <div id="configPanelFull" class="config-panel">
-                <div class="card">
-                    <div id="configFullBody" class="formCol"></div>
-                    <div class="row mt-18 mb-0 justify-end">
-                        <span id="cfgFullMsg" class="k"></span>
-                        <button id="cfgFullSave" type="button" class="primary">保存完整配置</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- YAML Panel -->
-            <div id="configPanelYaml" class="config-panel">
-                <div class="card">
-                    <div class="configRaw">
-                        <textarea id="cfgRaw" spellcheck="false" placeholder="加载中..."></textarea>
-                        <div class="row mb-0">
-                            <button id="cfgRawReload" type="button" class="sm">重新加载</button>
-                            <button id="cfgRawSave" type="button" class="primary sm">保存 YAML</button>
-                            <span id="cfgRawMsg" class="k"></span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </section>
     </main>
 
     <!-- ===== Login Modal ===== -->
@@ -415,12 +148,16 @@
     <div id="previewModal" class="modal hidden">
         <div class="modalCard previewCard">
             <div class="modalHeader">
-                <h3>书籍预览</h3>
-                <button id="previewClose" type="button" class="sm">关闭</button>
+                <h3>书籍预览 <span id="previewCacheHint" class="k hidden"></span></h3>
+                <div class="row mb-0" style="gap:8px">
+                    <button id="previewRefresh" type="button" class="sm" title="重新拉取并更新存档信息">信息更新</button>
+                    <button id="previewClose" type="button" class="sm">关闭</button>
+                </div>
             </div>
             <div id="previewContent">
                 <div id="previewLoading" class="k text-center pad-40">加载中...</div>
                 <div id="previewData" class="hidden">
+                    <div id="previewMetaWarn" class="preview-meta-warn hidden"></div>
                     <div class="previewHeader">
                         <img id="previewCover" alt="封面" class="previewCover hidden" />
                         <div class="previewInfo">

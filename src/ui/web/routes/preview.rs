@@ -1,8 +1,9 @@
 use axum::Json;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::path::{Path as FsPath, PathBuf};
 use tracing::{debug, info, warn};
@@ -10,6 +11,9 @@ use tracing::{debug, info, warn};
 use crate::base_system::book_id::resolve_book_id;
 use crate::base_system::book_paths::book_folder_path;
 use crate::base_system::context::safe_fs_name;
+use crate::base_system::download_history::{
+    DownloadHistoryRecord, DownloadMeta, archive_book_meta,
+};
 use crate::base_system::file_cleaner::is_empty_dir;
 use crate::book_parser::image_utils::ensure_cached_image;
 use crate::download::downloader as dl;
@@ -149,9 +153,18 @@ fn api_error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Jso
     (status, Json(json!({ "error": message.into() })))
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct PreviewQuery {
+    /// 调用方（搜索结果/下载库卡片）已知的书名。仅用于网页详情页 404 时保留“用户看到的那个名字”，
+    /// 不补作者/简介/评分。值来自同一 Provider 的搜索接口，非编造。
+    #[serde(default)]
+    hint_title: Option<String>,
+}
+
 pub(crate) async fn api_preview(
     State(state): State<AppState>,
     Path(book_id): Path<String>,
+    Query(pq): Query<PreviewQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let book_id = tokio::task::spawn_blocking(move || resolve_book_id(&book_id))
         .await
@@ -181,9 +194,17 @@ pub(crate) async fn api_preview(
         .clone();
     let cfg_for_plan = cfg.clone();
     let book_id_for_plan = book_id.clone();
+    // 书名 hint：prepare_download_plan 内部 merge_meta_prefer_hint_name 会优先保留它。
+    let hint = dl::BookMeta {
+        book_name: pq
+            .hint_title
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        ..Default::default()
+    };
 
     let plan = tokio::task::spawn_blocking(move || {
-        dl::prepare_download_plan(&cfg_for_plan, &book_id_for_plan, dl::BookMeta::default())
+        dl::prepare_download_plan(&cfg_for_plan, &book_id_for_plan, hint)
     })
     .await
     .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "预览任务执行失败"))?
@@ -194,6 +215,11 @@ pub(crate) async fn api_preview(
     // 使用 plan.book_id（可能含 sq: 前缀）而非输入的 book_id，
     // 确保前端后续操作（创建下载任务等）使用正确的规范化 ID。
     let resolved_book_id = &plan.book_id;
+
+    // 番茄网页详情页不存在（404）或抓取失败时，get_book_info 会静默返回全 None，
+    // 而目录/章节走另一条通道仍成功。此时必须如实标注，不能让 UI 拿空值渲染“未知书名”。
+    let is_fanqie = !(resolved_book_id.starts_with("sq:") || resolved_book_id.starts_with("qm:"));
+    let meta_missing = is_fanqie && meta.author.is_none() && meta.description.is_none();
 
     let cfg_for_cover = cfg.clone();
     let meta_for_cover = meta.clone();
@@ -230,6 +256,81 @@ pub(crate) async fn api_preview(
         "category": meta.category,
         "first_chapter_title": meta.first_chapter_title,
         "last_chapter_title": meta.last_chapter_title,
+        // 网页元数据是否缺失（番茄网页详情页 404 / 抓取失败），前端据此显示明确告警而非“未知”占位
+        "meta_missing": meta_missing,
+        // 缺失但仍有书名时，说明该名字来自调用方 hint（搜索接口），而非详情页
+        "book_name_from_hint": meta_missing && meta.book_name.is_some(),
+    })))
+}
+
+/// 预览补档：复用预览的取数据途径（prepare_download_plan），若该 book_id 尚无有效存档，
+/// 则写入一条 status=archive 的元数据记录，使下载记录/下载库能展示封面/简介/评分。
+pub(crate) async fn api_preview_archive(
+    State(state): State<AppState>,
+    Path(book_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let book_id = tokio::task::spawn_blocking(move || resolve_book_id(&book_id))
+        .await
+        .map_err(|_| {
+            api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "解析 book_id 任务执行失败",
+            )
+        })?
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "无法解析 book_id"))?;
+    if book_id.is_empty() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "book_id 为空"));
+    }
+
+    let cfg = state
+        .config
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let cfg_for_plan = cfg.clone();
+    let book_id_for_plan = book_id.clone();
+    let plan = tokio::task::spawn_blocking(move || {
+        dl::prepare_download_plan(&cfg_for_plan, &book_id_for_plan, dl::BookMeta::default())
+    })
+    .await
+    .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "补档任务执行失败"))?
+    .map_err(|err| api_error(StatusCode::BAD_GATEWAY, format!("补档失败: {err}")))?;
+
+    let meta = &plan.meta;
+    let book_name = meta
+        .book_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| plan.book_id.clone());
+    let author = meta.author.clone().unwrap_or_default();
+
+    let record = DownloadHistoryRecord::new(
+        plan.book_id.clone(),
+        book_name,
+        author,
+        plan.chapters.len(),
+        0,
+        0,
+        "archive".to_string(),
+        DownloadMeta {
+            description: meta.description.clone(),
+            cover_url: meta
+                .cover_url
+                .clone()
+                .or_else(|| meta.detail_cover_url.clone()),
+            score: meta.score,
+            word_count: meta.word_count,
+            finished: meta.finished,
+            category: meta.category.clone(),
+            read_count_text: meta.read_count_text.clone(),
+        },
+    );
+
+    let archived = archive_book_meta(&plan.book_id, &record);
+    Ok(Json(json!({
+        "ok": true,
+        "book_id": plan.book_id,
+        "archived": archived,
     })))
 }
 

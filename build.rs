@@ -6,7 +6,7 @@ fn main() {
         {
             use winres::WindowsResource;
             WindowsResource::new()
-                .set_icon("img/Tomato-downloader-ico.ico")
+                .set_icon("img/app.ico")
                 .compile()
                 .expect("failed to embed Windows icon");
         }

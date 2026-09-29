@@ -13,4 +13,5 @@ pub mod file_cleaner;
 pub mod json_extract;
 pub mod logging;
 pub mod novel_updates;
+pub mod search_history;
 pub mod self_update;

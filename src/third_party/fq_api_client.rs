@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::fq_crypto;
 use super::unidbg_signer::UnidbgSigner;
+use crate::base_system::json_extract::to_public_jpeg_cover;
 
 /// API 基地址。
 const API_BASE: &str = "https://api5-normal-sinfonlineb.fqnovel.com";
@@ -391,11 +392,121 @@ impl FqApiClient {
         self.signer.health()
     }
 
-    /// 搜索书籍（通过 sidecar 的 `/api/fqsearch/books` 端点）。
+    /// 直连签名搜索（可指定分类 tab_type、筛选 selected_items、分页 offset），
+    /// 返回 `{items, tabs, selector, has_more, next_offset, tab_type}`。
     ///
-    /// 返回 `Vec<Value>`，每项包含 `book_id`、`title`、`author`、`raw` 字段，
-    /// 与 official-api 的 `SearchClient::search_books` 返回格式兼容。
-    pub(crate) fn search_books(&self, query: &str) -> Result<Vec<Value>> {
+    /// 分类 tab 与筛选均为无状态单请求（实测无需会话 search_id），一次响应即包含
+    /// 全部分类 tab 的元数据与筛选器（selector.rows），供前端构建工具栏。
+    pub(crate) fn search_enriched(
+        &self,
+        query: &str,
+        tab_type: i64,
+        selected_items: Option<&str>,
+        offset: usize,
+    ) -> Result<Value> {
+        let kw = query.trim();
+        if kw.is_empty() {
+            return Ok(json!({ "items": [], "tabs": [] }));
+        }
+        let tt = if tab_type == 0 { 1 } else { tab_type };
+        let url = format!("{API_BASE}/reading/bookapi/search/tab/v");
+        let mut params = build_common_params();
+        params.extend([
+            ("query".into(), url_encode(kw)),
+            ("tab_name".into(), url_encode(tab_name(tt))),
+            ("tab_type".into(), tt.to_string()),
+            ("user_is_login".into(), "0".into()),
+            (
+                "bookstore_tab".into(),
+                if tt == 3 { "0".into() } else { "2".into() },
+            ),
+            ("offset".into(), offset.to_string()),
+            ("count".into(), "20".into()),
+            ("search_source".into(), "1".into()),
+            ("bookshelf_search_plan".into(), "4".into()),
+        ]);
+        if let Some(si) = selected_items.map(str::trim).filter(|s| !s.is_empty()) {
+            params.push(("selected_items".into(), si.to_string()));
+        }
+        let full_url = format!("{}?{}", url, join_params(&params));
+
+        let want_fallback = tt == 1
+            && offset == 0
+            && selected_items
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none();
+        const RETRY: usize = 3;
+        let mut last_err = String::new();
+        for attempt in 0..RETRY {
+            match self.try_signed_search(&full_url) {
+                Ok(v) => {
+                    let items = parse_tab_items(&v, tt);
+                    // 综合无结果且允许回退时，跳出走 sidecar；否则直接返回（含空列表）。
+                    if !items.is_empty() || !want_fallback {
+                        let (has_more, next_offset) = tab_pagination(&v, tt);
+                        return Ok(json!({
+                            "items": items,
+                            "tabs": build_tabs_meta(&v),
+                            "selector": build_selector(&v),
+                            "has_more": has_more,
+                            "next_offset": next_offset,
+                            "tab_type": tt,
+                        }));
+                    }
+                    last_err = "综合直连返回空".to_string();
+                    break;
+                }
+                Err(e) => {
+                    last_err = e.to_string();
+                    tracing::warn!("番茄直连搜索失败(第 {} 次): {}", attempt + 1, last_err);
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        600 * (attempt as u64 + 1),
+                    ));
+                }
+            }
+        }
+        // 仅「综合、无筛选、首页」回退到 sidecar（sidecar 不支持分类/筛选）。
+        if want_fallback {
+            tracing::warn!("番茄直连综合搜索失败/空({last_err})，回退 sidecar");
+            let items = self.search_books_via_sidecar(kw)?;
+            return Ok(json!({
+                "items": items,
+                "tabs": [],
+                "selector": Value::Null,
+                "has_more": false,
+                "next_offset": 0,
+                "tab_type": 1,
+            }));
+        }
+        Err(anyhow!("番茄直连搜索失败(已重试 {RETRY} 次): {last_err}"))
+    }
+
+    /// 签名 + 直连请求一次，返回原始 JSON。
+    fn try_signed_search(&self, full_url: &str) -> Result<Value> {
+        let headers = build_common_headers();
+        let sig = self.signer.sign(full_url, &headers)?;
+        let mut req = self.http.get(full_url);
+        for (k, v) in headers.iter().chain(sig.iter()) {
+            req = req.header(k, v);
+        }
+        let resp = req.send().context("search/tab request failed")?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("search/tab HTTP {}", resp.status()));
+        }
+        let v: Value = resp.json().context("search/tab parse JSON failed")?;
+        let code = v.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
+        if code != 0 {
+            return Err(anyhow!(
+                "search/tab code={code}: {}",
+                v.get("message").and_then(|m| m.as_str()).unwrap_or("")
+            ));
+        }
+        Ok(v)
+    }
+
+    /// 通过已部署 sidecar 的 `/api/fqsearch/books` 搜索（字段较薄，无绝对封面）。
+    fn search_books_via_sidecar(&self, query: &str) -> Result<Vec<Value>> {
         let endpoint = format!("{}/api/fqsearch/books", self.signer.base_url());
         let resp = self
             .http
@@ -436,5 +547,293 @@ impl FqApiClient {
             })
             .collect();
         Ok(items)
+    }
+}
+
+/// 从 cell 里取第一条 `book_data`（可能是数组或对象）。
+fn first_book_data(cell: &Value) -> Option<&Value> {
+    match cell.get("book_data") {
+        Some(Value::Array(a)) => a.iter().find(|x| x.is_object()),
+        Some(v) if v.is_object() => Some(v),
+        _ => None,
+    }
+}
+
+/// 从 book_data 构造浏览器可渲染的封面 URL：优先用 `thumb_uri` 拼公网免签 JPEG 镜像，
+/// 否则回退到绝对 `thumb_url` 并把 HEIC 归一化为 JPEG。
+fn fq_cover_url(bd: &Value) -> Option<String> {
+    if let Some(uri) = bd.get("thumb_uri").and_then(|x| x.as_str()) {
+        let uri = uri.trim().trim_matches('/');
+        // thumb_uri 可能是 `novel-pic/<hash>` 或纯 `<hash>`（无目录前缀），
+        // 两者在公网 byteimg 都有免签 JPEG 镜像，故不能要求必须含 '/'。
+        if !uri.is_empty() && !uri.contains("//") && !uri.contains("..") {
+            return Some(format!(
+                "https://p6-novel.byteimg.com/{uri}~tplv-shrink:360:0.jpeg"
+            ));
+        }
+    }
+    bd.get("thumb_url")
+        .and_then(|x| x.as_str())
+        .map(to_public_jpeg_cover)
+        .filter(|u| u.starts_with("http"))
+}
+
+/// tab_type → 请求时传的 tab_name（中文名，需百分号编码；综合用 store）。
+fn tab_name(tt: i64) -> &'static str {
+    match tt {
+        1 => "store",
+        2 => "听书",
+        3 => "书籍",
+        4 => "社区",
+        5 => "全文",
+        6 => "用户",
+        8 => "漫画",
+        11 => "短剧",
+        13 => "买书",
+        19 => "漫剧",
+        _ => "store",
+    }
+}
+
+/// 从 search_tabs 中找到目标 tab（按 tab_type；否则退化为首个有数据的 tab）。
+fn find_tab(v: &Value, want: i64) -> Option<&Value> {
+    let tabs = v.get("search_tabs").and_then(|x| x.as_array())?;
+    tabs.iter()
+        .find(|t| t.get("tab_type").and_then(|x| x.as_i64()) == Some(want))
+        .or_else(|| {
+            tabs.iter().find(|t| {
+                t.get("data")
+                    .and_then(|d| d.as_array())
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false)
+            })
+        })
+        .or_else(|| tabs.first())
+}
+
+/// 目标 tab 的书籍 cell → 富字段 item 列表。
+fn parse_tab_items(v: &Value, want: i64) -> Vec<Value> {
+    let Some(cells) = find_tab(v, want)
+        .and_then(|t| t.get("data"))
+        .and_then(|d| d.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut items: Vec<Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for cell in cells {
+        // cell 有两种形态：网文/听书用 book_data，短剧/漫剧用 video_data（上游 tab=11/19 返回后者）。
+        // 早期只认 book_data，导致短剧/漫剧 tab 明明各有 20 条数据却全被丢弃（表现为“0 条”）。
+        let Some(bd) = first_book_data(cell) else {
+            if let Some(vd) = first_video_data(cell) {
+                push_video_item(&mut items, &mut seen, vd, cell, want);
+            }
+            continue;
+        };
+        let book_id = bd
+            .get("book_id")
+            .and_then(|x| x.as_str())
+            .or_else(|| cell.get("book_id").and_then(|x| x.as_str()))
+            .unwrap_or("")
+            .to_string();
+        if book_id.is_empty() || !seen.insert(book_id.clone()) {
+            continue;
+        }
+        let description = bd
+            .get("abstract")
+            .and_then(|x| x.as_str())
+            .or_else(|| bd.get("book_abstract_v2").and_then(|x| x.as_str()))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let tags: Vec<String> = bd
+            .get("tags")
+            .and_then(|x| x.as_str())
+            .map(|s| {
+                s.split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let finished = match json_i64(bd.get("creation_status")) {
+            Some(0) => Some(true),
+            Some(1) => Some(false),
+            _ => None,
+        };
+        items.push(json!({
+            "book_id": book_id,
+            "title": bd.get("book_name").and_then(|x| x.as_str()).unwrap_or(""),
+            "author": bd.get("author").and_then(|x| x.as_str()).unwrap_or(""),
+            "cover_url": fq_cover_url(bd),
+            "description": description,
+            "score": bd.get("score").cloned().unwrap_or(Value::Null),
+            "category": bd.get("category").and_then(|x| x.as_str()),
+            "tags": tags,
+            "word_count": json_u64(bd.get("word_number")),
+            "chapter_count": json_u64(bd.get("serial_count")),
+            "finished": finished,
+            "read_count_text": bd.get("read_cnt_text").and_then(|x| x.as_str()),
+            // 品类标识：book_type=="1" 为听书/音频（实测此类书在番茄 Web 站常无 /page/ 书页），
+            // "0" 为网文小说。仅按上游字段分类，不做任何推断。
+            "content_kind": content_kind_of(bd),
+            "raw": bd,
+        }));
+    }
+    items
+}
+
+/// book_data 的品类：book_type 可能为字符串或数字。
+fn content_kind_of(bd: &Value) -> &'static str {
+    let bt = match bd.get("book_type") {
+        Some(Value::String(s)) => s.trim().to_string(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    };
+    if bt == "1" { "audio" } else { "novel" }
+}
+
+/// 从 cell 里取第一条 `video_data`（短剧/漫剧条目）。
+fn first_video_data(cell: &Value) -> Option<&Value> {
+    match cell.get("video_data") {
+        Some(Value::Array(a)) => a.iter().find(|x| x.is_object()),
+        Some(v) if v.is_object() => Some(v),
+        _ => None,
+    }
+}
+
+/// video_data（短剧/漫剧）→ 卡片 item。字段全部取自上游，缺失的一律 null、不推断：
+/// video_data 无作者（`copyright` 是版权方不是作者）、无字数、无连载状态，故这些为 null；
+/// `sub_title`（如“都市修真·复仇·全60集”）单独透出，不当作简介。
+fn push_video_item(
+    items: &mut Vec<Value>,
+    seen: &mut std::collections::HashSet<String>,
+    vd: &Value,
+    cell: &Value,
+    want: i64,
+) {
+    let book_id = vd
+        .get("series_id")
+        .and_then(|x| x.as_str())
+        .or_else(|| cell.get("book_id").and_then(|x| x.as_str()))
+        .unwrap_or("")
+        .to_string();
+    if book_id.is_empty() || !seen.insert(book_id.clone()) {
+        return;
+    }
+    let title = vd
+        .get("raw_book_name")
+        .and_then(|x| x.as_str())
+        .or_else(|| vd.get("title").and_then(|x| x.as_str()))
+        .unwrap_or("");
+    // 运营标签（“漫剧”/“热门”/“小说改编”）原样透出，不代表我们对其含义的判定。
+    let tags: Vec<String> = vd
+        .get("cover_tag_info_list")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| t.get("text").and_then(|x| x.as_str()))
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let score = match vd.get("score") {
+        Some(Value::Number(n)) => n.as_f64().map(|f| json!(f)).unwrap_or(Value::Null),
+        Some(Value::String(s)) => s
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|f| json!(f))
+            .unwrap_or(Value::Null),
+        _ => Value::Null,
+    };
+    let cover = vd
+        .get("cover")
+        .and_then(|x| x.as_str())
+        .map(to_public_jpeg_cover)
+        .filter(|u| u.starts_with("http"));
+    // 品类中文名：只有从对应 tab 请求时才能确定（11=短剧、19=漫剧）；
+    // 综合 tab 里混进的 video cell 无法区分，不下label，由前端给统一兑底文案。
+    let kind_label = match want {
+        11 => Some("短剧"),
+        19 => Some("漫剧"),
+        _ => None,
+    };
+    items.push(json!({
+        "book_id": book_id,
+        "title": title,
+        "author": "",
+        "cover_url": cover,
+        "description": Value::Null,
+        "sub_title": vd.get("sub_title").and_then(|x| x.as_str()),
+        "score": score,
+        "category": Value::Null,
+        "tags": tags,
+        "word_count": Value::Null,
+        "chapter_count": json_u64(vd.get("episode_cnt")),
+        "count_unit": "集",
+        "finished": Value::Null,
+        "read_count_text": vd.get("rec_text").and_then(|x| x.as_str()),
+        "content_kind": "video",
+        "kind_label": kind_label,
+        "raw": vd,
+    }));
+}
+
+/// 全部分类 tab 元数据：`[{tab_type,title,has_more,next_offset}]`。
+fn build_tabs_meta(v: &Value) -> Vec<Value> {
+    let Some(tabs) = v.get("search_tabs").and_then(|x| x.as_array()) else {
+        return Vec::new();
+    };
+    tabs.iter()
+        .filter_map(|t| {
+            let tt = t.get("tab_type").and_then(|x| x.as_i64())?;
+            let title = t.get("title").and_then(|x| x.as_str()).unwrap_or("");
+            Some(json!({
+                "tab_type": tt,
+                "title": title,
+                "has_more": t.get("has_more").and_then(|x| x.as_bool()).unwrap_or(false),
+                "next_offset": json_u64(t.get("next_offset")),
+            }))
+        })
+        .collect()
+}
+
+/// 筛选器：优先取综合 tab（tab_type=1）的 selector，否则首个带 selector 的 tab。
+fn build_selector(v: &Value) -> Option<Value> {
+    let tabs = v.get("search_tabs").and_then(|x| x.as_array())?;
+    let with = |t: &Value| t.get("selector").filter(|s| !s.is_null()).cloned();
+    tabs.iter()
+        .find(|t| t.get("tab_type").and_then(|x| x.as_i64()) == Some(1))
+        .and_then(with)
+        .or_else(|| tabs.iter().find_map(with))
+}
+
+/// 目标 tab 的分页信息 (has_more, next_offset)。
+fn tab_pagination(v: &Value, want: i64) -> (bool, usize) {
+    find_tab(v, want)
+        .map(|t| {
+            (
+                t.get("has_more").and_then(|x| x.as_bool()).unwrap_or(false),
+                json_u64(t.get("next_offset")).unwrap_or(0) as usize,
+            )
+        })
+        .unwrap_or((false, 0))
+}
+
+/// 数字字段容错：上游可能以数字或字符串返回（如 `"1979646"`）。
+fn json_u64(v: Option<&Value>) -> Option<u64> {
+    match v? {
+        Value::Number(n) => n.as_u64(),
+        Value::String(s) => s.trim().parse::<u64>().ok(),
+        _ => None,
+    }
+}
+
+fn json_i64(v: Option<&Value>) -> Option<i64> {
+    match v? {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.trim().parse::<i64>().ok(),
+        _ => None,
     }
 }

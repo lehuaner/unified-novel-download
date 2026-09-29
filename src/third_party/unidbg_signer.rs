@@ -43,15 +43,29 @@ struct SignResponse {
 }
 
 impl SignResponse {
-    fn to_header_map(self) -> HashMap<String, String> {
+    fn into_header_map(self) -> HashMap<String, String> {
         let mut m = HashMap::new();
-        if let Some(v) = self.x_ladon { m.insert("X-Ladon".into(), v); }
-        if let Some(v) = self.x_khronos { m.insert("X-Khronos".into(), v); }
-        if let Some(v) = self.x_soter { m.insert("X-Soter".into(), v); }
-        if let Some(v) = self.x_argus { m.insert("X-Argus".into(), v); }
-        if let Some(v) = self.x_gorgon { m.insert("X-Gorgon".into(), v); }
-        if let Some(v) = self.x_helios { m.insert("X-Helios".into(), v); }
-        if let Some(v) = self.x_medusa { m.insert("X-Medusa".into(), v); }
+        if let Some(v) = self.x_ladon {
+            m.insert("X-Ladon".into(), v);
+        }
+        if let Some(v) = self.x_khronos {
+            m.insert("X-Khronos".into(), v);
+        }
+        if let Some(v) = self.x_soter {
+            m.insert("X-Soter".into(), v);
+        }
+        if let Some(v) = self.x_argus {
+            m.insert("X-Argus".into(), v);
+        }
+        if let Some(v) = self.x_gorgon {
+            m.insert("X-Gorgon".into(), v);
+        }
+        if let Some(v) = self.x_helios {
+            m.insert("X-Helios".into(), v);
+        }
+        if let Some(v) = self.x_medusa {
+            m.insert("X-Medusa".into(), v);
+        }
         m
     }
 }
@@ -88,7 +102,10 @@ impl UnidbgSigner {
         url: &str,
         headers: &HashMap<String, String>,
     ) -> Result<HashMap<String, String>> {
-        let endpoint = format!("{}/api/fq-signature/generateSignatureWithMap", self.base_url);
+        let endpoint = format!(
+            "{}/api/fq-signature/generateSignatureWithMap",
+            self.base_url
+        );
         let req = SignRequest {
             url: url.to_string(),
             header_map: headers.clone(),
@@ -98,9 +115,11 @@ impl UnidbgSigner {
             return Err(anyhow!("signer HTTP {}", resp.status()));
         }
         let sr: SignResponse = resp.json()?;
-        let map = sr.to_header_map();
+        let map = sr.into_header_map();
         if map.is_empty() {
-            return Err(anyhow!("signer returned empty signatures (URL may lack device params)"));
+            return Err(anyhow!(
+                "signer returned empty signatures (URL may lack device params)"
+            ));
         }
         Ok(map)
     }

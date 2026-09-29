@@ -106,7 +106,8 @@ pub fn prepare_download_plan(
         #[cfg(feature = "shuqi")]
         if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
             let shuqi_id = format!("sq:{book_id}");
-            if let Ok(plan) = crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint.clone()) {
+            if let Ok(plan) = crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint.clone())
+            {
                 return Ok(plan);
             }
         }
@@ -114,8 +115,7 @@ pub fn prepare_download_plan(
         #[cfg(feature = "qimao")]
         if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
             let qimao_id = format!("qm:{book_id}");
-            if let Ok(plan) =
-                crate::qimao::prepare_qimao_plan(config, &qimao_id, meta_hint.clone())
+            if let Ok(plan) = crate::qimao::prepare_qimao_plan(config, &qimao_id, meta_hint.clone())
             {
                 return Ok(plan);
             }
