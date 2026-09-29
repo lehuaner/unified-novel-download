@@ -9,7 +9,24 @@ debug/
 /config.yml
 /.tnd_update_cache.json
 /novels
+/downloads
 /shuqi_data
+/examples
+# Web UI 会话签名密钥（本地生成，绝不能入库）
+/web_session_secret.key
+
+# Alternate cargo target dirs (dev scratch builds)
+/target_qm
+/target_smoke
+/publish
+
+# Local reverse-engineering / scratch area (kept out of the repo history)
+/localtest
+
+# Dropped binaries & ad-hoc screenshots at repo root
+/tnd-binary
+/UnifiedNovelDownloader-*
+/probe_size.png
 
 # IDE
 /.idea
