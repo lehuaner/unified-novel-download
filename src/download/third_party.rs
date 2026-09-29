@@ -12,65 +12,6 @@ use crate::book_parser::parser::ContentParser;
 use crate::third_party::content_client::ThirdPartyContentClient;
 use crate::third_party::fq_api_client::FqApiClient;
 
-#[cfg(feature = "official-api")]
-fn normalize_base(base: &str) -> String {
-    base.trim().trim_end_matches('/').to_string()
-}
-
-#[cfg(feature = "official-api")]
-fn ensure_trailing_query_base(url: &str) -> String {
-    let u = url.trim();
-    if u.ends_with('?') || u.ends_with('&') {
-        return u.to_string();
-    }
-    if u.contains('?') {
-        return format!("{}&", u);
-    }
-    format!("{}?", u)
-}
-
-#[allow(clippy::type_complexity)]
-#[cfg(feature = "official-api")]
-pub(crate) fn resolve_api_urls(
-    cfg: &Config,
-) -> Result<(Option<String>, Option<(String, String)>), anyhow::Error> {
-    if cfg.use_official_api {
-        return Ok((None, None));
-    }
-
-    let base = cfg
-        .api_endpoints
-        .first()
-        .map(|s| s.as_str())
-        .map(normalize_base)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| anyhow!("use_official_api=false 时，api_endpoints 不能为空"))?;
-
-    // 目录接口（网页端）
-    let directory_url = if base.contains("/api/") && base.contains("directory") {
-        base.clone()
-    } else {
-        format!("{}/api/reader/directory/detail", base)
-    };
-
-    // 正文 batch_full + registerkey（reading 域名反代）
-    let register_key_url = if base.contains("registerkey") {
-        base.clone()
-    } else {
-        format!("{}/reading/crypt/registerkey", base)
-    };
-    let batch_full_url = if base.contains("batch_full") {
-        ensure_trailing_query_base(&base)
-    } else {
-        ensure_trailing_query_base(&format!("{}/reading/reader/batch_full/v", base))
-    };
-
-    Ok((
-        Some(directory_url),
-        Some((register_key_url, batch_full_url)),
-    ))
-}
-
 pub(crate) fn ms_from_connect_timeout_secs(v: f64) -> Option<u64> {
     if v <= 0.0 {
         return None;

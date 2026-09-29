@@ -1,16 +1,19 @@
 //! 段评并发下载工作池。
 //!
 //! 负责在下载章节正文的同时，并行抓取段落评论（segment comments）并缓存到磁盘。
+//!
+//! 说明：段评抓取依赖官方 API 通道，当前唯一构建方案（第三方解析）不具备该能力，
+//! 因此相关实现统一用 `#[cfg(any())]` 保留而不参与编译；文件末尾的占位实现才是生效版本。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, atomic::AtomicBool};
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 use std::time::Duration;
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 use crossbeam_channel as channel;
 
 use super::progress::ProgressReporter;
@@ -18,20 +21,20 @@ use crate::base_system::context::Config;
 
 // 共享类型与工具函数（与 book_parser 侧去重）
 pub(crate) use crate::book_parser::segment_shared::extract_item_version_map;
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 pub(crate) use crate::book_parser::segment_shared::{
     SegmentCommentsChapterCache, SegmentCommentsParaCache,
 };
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 pub(crate) use crate::book_parser::segment_shared::{extract_para_counts_from_stats, write_atomic};
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 use tomato_novel_official_api::{CommentDownloadOptions, DirectoryClient, ReviewClient};
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 use std::sync::OnceLock;
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 #[derive(Debug, Clone, Copy)]
 enum SegmentEvent {
     Saved,
@@ -56,7 +59,7 @@ pub(crate) fn count_segment_comment_cache_files(seg_dir: &Path) -> usize {
 // ── 单章段评拉取 ──────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 fn fetch_segment_comments_for_chapter(
     client: &ReviewClient,
     _cfg: &Config,
@@ -143,14 +146,14 @@ fn fetch_segment_comments_for_chapter(
 
 // ── SegmentCommentPool（official-api 版本）──────────────────────
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 pub(crate) struct SegmentCommentPool {
     tx: Option<channel::Sender<String>>,
     rx_evt: channel::Receiver<SegmentEvent>,
     handles: Vec<std::thread::JoinHandle<()>>,
 }
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 impl SegmentCommentPool {
     pub(crate) fn new(
         cfg: Config,
@@ -318,12 +321,9 @@ impl SegmentCommentPool {
     }
 }
 
-// ── SegmentCommentPool（非 official-api 占位版本）──────────────────
-
-#[cfg(not(feature = "official-api"))]
+// ── SegmentCommentPool（占位版本：段评入口关闭）──────────────────
 pub(crate) struct SegmentCommentPool;
 
-#[cfg(not(feature = "official-api"))]
 impl SegmentCommentPool {
     pub(crate) fn new(
         _cfg: Config,

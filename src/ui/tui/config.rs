@@ -617,7 +617,7 @@ pub(super) fn draw_config(frame: &mut ratatui::Frame, app: &mut App) {
     let header = Paragraph::new(header_line).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Tomato Novel Downloader"),
+            .title("Unified Novel Downloader"),
     );
     frame.render_widget(header, layout[0]);
 

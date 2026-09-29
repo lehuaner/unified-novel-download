@@ -38,7 +38,6 @@
                 </svg>
                 <span id="themeLabel">切换主题</span>
             </button>
-            {{FREE_NOTICE}}
         </div>
     </aside>
 
@@ -110,6 +109,11 @@
 
     </main>
 
+    <!-- ===== 底部横条：完全免费声明（桌面与移动端均固定在页面最底部） ===== -->
+    <footer class="notice-bar">
+        {{FREE_NOTICE}}
+    </footer>
+
     <!-- ===== Login Modal ===== -->
     <div id="loginModal" class="modal hidden">
         <div class="modalCard">
@@ -133,7 +137,7 @@
                 <h3>IID 注册失败：可能被反广告/校园网拦截</h3>
                 <button id="iidWarningClose" type="button" class="sm">关闭</button>
             </div>
-            <p class="k mb-16">番茄官方接口需要先注册 IID。如果这里失败，后续搜索、预览或下载可能会异常。</p>
+            <p class="k mb-16">番茄内容接口需要先注册 IID（由本地签名服务或第三方端点使用）。如果这一步失败，后续搜索、预览或下载可能会异常。</p>
             <div id="iidWarningBody" class="error text-pre-wrap mb-16"></div>
             <div class="small text-pre-wrap">
                 建议：将 <code>log.snssdk.com</code> 加入 AdGuard / uBlock / 代理规则 / DNS 过滤 / 公司或校园网网关的放行列表，或临时关闭相关拦截后重试。

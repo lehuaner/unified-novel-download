@@ -14,6 +14,9 @@ use crate::base_system::context::{
 
 use super::App;
 
+// 段评相关变体（EnableSegmentComments / SegmentCommentsTopN / SegmentCommentsWorkers）
+// 的配置入口已关闭，但 Config 字段与段评实现仍保留，待第三方段评接口接入时复用。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub(in crate::ui) enum ConfigField {
     SavePath,
@@ -25,7 +28,6 @@ pub(in crate::ui) enum ConfigField {
     OldCli,
     FirstLineIndentEm,
     EnableSegmentComments,
-    UseOfficialApi,
     ApiEndpoints,
     UnidbgSignerUrl,
     MaxWorkers,
@@ -261,33 +263,12 @@ pub(in crate::ui) fn build_config_categories() -> Vec<ConfigCategory> {
             title: "API",
             entries: vec![
                 ConfigEntry {
-                    title: "使用官方API",
-                    field: ConfigField::UseOfficialApi,
-                },
-                ConfigEntry {
                     title: "API 列表(逗号分隔)",
                     field: ConfigField::ApiEndpoints,
                 },
                 ConfigEntry {
                     title: "unidbg签名sidecar地址",
                     field: ConfigField::UnidbgSignerUrl,
-                },
-            ],
-        },
-        ConfigCategory {
-            title: "段评",
-            entries: vec![
-                ConfigEntry {
-                    title: "启用段评",
-                    field: ConfigField::EnableSegmentComments,
-                },
-                ConfigEntry {
-                    title: "每段评论数上限",
-                    field: ConfigField::SegmentCommentsTopN,
-                },
-                ConfigEntry {
-                    title: "段评并发线程数",
-                    field: ConfigField::SegmentCommentsWorkers,
                 },
             ],
         },
@@ -407,7 +388,6 @@ pub(in crate::ui) fn current_cfg_value(app: &App, field: ConfigField) -> String 
         }
         ConfigField::OldCli => app.config.old_cli.to_string(),
         ConfigField::EnableSegmentComments => app.config.enable_segment_comments.to_string(),
-        ConfigField::UseOfficialApi => app.config.use_official_api.to_string(),
         ConfigField::ApiEndpoints => app.config.api_endpoints.join(","),
         ConfigField::UnidbgSignerUrl => app.config.unidbg_signer_url.clone(),
         ConfigField::MaxWorkers => app.config.max_workers.to_string(),
@@ -453,7 +433,6 @@ pub(in crate::ui) fn cfg_field_is_bool(field: ConfigField) -> bool {
             | ConfigField::AllowOverwriteFiles
             | ConfigField::OldCli
             | ConfigField::EnableSegmentComments
-            | ConfigField::UseOfficialApi
             | ConfigField::EnableAudiobook
             | ConfigField::DownloadCommentImages
             | ConfigField::DownloadCommentAvatars
@@ -471,7 +450,6 @@ fn cfg_field_current_bool(app: &App, field: ConfigField) -> Option<bool> {
         ConfigField::AllowOverwriteFiles => app.config.allow_overwrite_files,
         ConfigField::OldCli => app.config.old_cli,
         ConfigField::EnableSegmentComments => app.config.enable_segment_comments,
-        ConfigField::UseOfficialApi => app.config.use_official_api,
         ConfigField::EnableAudiobook => app.config.enable_audiobook,
         ConfigField::DownloadCommentImages => app.config.download_comment_images,
         ConfigField::DownloadCommentAvatars => app.config.download_comment_avatars,
@@ -615,10 +593,6 @@ pub(in crate::ui) fn apply_cfg_edit(app: &mut App, cat_idx: usize, entry_idx: us
                 return Ok(());
             }
             app.config.enable_segment_comments = val;
-        }
-        ConfigField::UseOfficialApi => {
-            let val = parse_bool(raw).ok_or_else(|| anyhow!("请输入 true/false"))?;
-            app.config.use_official_api = val;
         }
         ConfigField::ApiEndpoints => {
             let list = parse_string_list(raw);

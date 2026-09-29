@@ -1,7 +1,6 @@
 pub(crate) mod app_update;
 pub(crate) mod auth;
 pub(crate) mod download;
-pub(crate) mod history;
 pub(crate) mod index;
 pub(crate) mod jobs;
 pub(crate) mod library;
@@ -9,5 +8,4 @@ pub(crate) mod preview;
 pub(crate) mod search;
 pub(crate) mod search_cover;
 pub(crate) mod search_history;
-pub(crate) mod status;
 pub(crate) mod updates;

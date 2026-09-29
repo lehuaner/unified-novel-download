@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Local maintenance checks for Tomato Novel Downloader.
-# Do not use `cargo --all-features`: `official-api` and `no-official-api`
-# are mutually exclusive by design.
+# Local maintenance checks for Unified Novel Downloader.
+# Do not use `cargo --all-features`: `tts` and `tts-native` select different TTS
+# backends, and `docker` disables self-update.
 
 skip_fmt=0
-skip_no_official=0
+skip_cross=0
 skip_tree=0
 
 for arg in "$@"; do
   case "$arg" in
     --skip-fmt) skip_fmt=1 ;;
-    --skip-no-official) skip_no_official=1 ;;
+    --skip-cross) skip_cross=1 ;;
     --skip-tree) skip_tree=1 ;;
     -h|--help)
       cat <<'EOF'
-Usage: ./scripts/maintain.sh [--skip-fmt] [--skip-no-official] [--skip-tree]
+Usage: ./scripts/maintain.sh [--skip-fmt] [--skip-cross] [--skip-tree]
 
 Runs format, test, clippy, and duplicate dependency checks using valid feature combinations.
 EOF
@@ -51,12 +51,12 @@ cargo test
 step "Default feature clippy"
 cargo clippy --all-targets -- -D warnings
 
-if [[ "$skip_no_official" -eq 0 ]]; then
-  step "no-official-api tests"
-  cargo test --no-default-features --features no-official-api
+if [[ "$skip_cross" -eq 0 ]]; then
+  step "Cross-target feature tests (musl/android set)"
+  cargo test --no-default-features --features shuqi,qimao,tts-native,clipboard
 
-  step "no-official-api clippy"
-  cargo clippy --no-default-features --features no-official-api --all-targets -- -D warnings
+  step "Cross-target clippy (musl/android set)"
+  cargo clippy --no-default-features --features shuqi,qimao,tts-native,clipboard --all-targets -- -D warnings
 fi
 
 if [[ "$skip_tree" -eq 0 ]]; then

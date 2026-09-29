@@ -18,7 +18,7 @@
 .PARAMETER NoClean
     Do NOT reap stale dev instances (leftover dev binary / sidecar JVM) before
     starting. By default they ARE reaped: a running dev binary holds an
-    exclusive lock on target\debug\tomato-novel-downloader.exe, so the next
+    exclusive lock on target\debug\unified-novel-downloader.exe, so the next
     build dies with "error: failed to remove file ...".
 
 .EXAMPLE
@@ -56,12 +56,17 @@ if ($CliArgs) {
 # Configuration - EDIT THESE VALUES
 # ============================================================================
 
-## Java sidecar JAR path (REQUIRED - set to your local path)
-$JAR_PATH = "D:\Code\Project\Rust\fqnovel-unidbg\target\unidbg-boot-server-0.0.1-SNAPSHOT.jar"
+## Java sidecar —— 关键代码已并入本仓库 java-sidecar/。
+## 桌面开发：jar 缺失时由下方 preflight 自动构建；APK/.so 不进仓库，见 tools/fetch_assets.ps1。
+$SIDECAR_DIR    = Join-Path $PSScriptRoot "java-sidecar"
+$JAR_PATH       = Join-Path $SIDECAR_DIR "target\unidbg-boot-server-0.0.1-SNAPSHOT.jar"
+$SIDECAR_ASSETS = Join-Path $SIDECAR_DIR "sidecar-assets"
 
 ## Java JVM options (unidbg needs more heap for native lib simulation)
+## -Dsidecar.assets.dir：APK 下载与 .so 首启抽取的外部目录（jar 不再内嵌 APK/.so）
 $JAVA_OPTS = @(
-    "-Xms64m", "-Xmx512m"
+    "-Xms64m", "-Xmx512m",
+    "-Dsidecar.assets.dir=$SIDECAR_ASSETS"
 )
 
 ## Sidecar port (must match unidbg_signer_url in app config)
@@ -76,20 +81,19 @@ $WEB_ADDR = "0.0.0.0:18423"
 $WEB_PASSWORD = "dev123456"
 
 ## Cargo features (comma-separated, no spaces)
-## Use "no-official-api" if you don't have Tomato-Novel-Official-API repo locally.
-## The workflow falls back to no-official-api when OAPI secret is not set.
-$CARGO_FEATURES = "no-official-api,shuqi,qimao,tts,clipboard,clipboard-arboard"
+## 项目现在只有一种构建方案（第三方解析）：shuqi / qimao 已列入 Cargo.toml 的 default，
+## 这里显式写出仅作为 dev 侧可见提示，不要再叠加 --no-default-features。
+$CARGO_FEATURES = "shuqi,qimao,tts,clipboard,clipboard-arboard"
 
-## Disable default features (required when using no-official-api,
-## otherwise default = ["official-api", ...] still enables official-api)
-$NO_DEFAULT_FEATURES = $true
+## Keep default features enabled (default already contains tts/clipboard/shuqi/qimao).
+$NO_DEFAULT_FEATURES = $false
 
 ## Rust extra args passed to the binary
 $RUST_ARGS = @("--server", "--debug")
 
 ## Binary name (without .exe). Used to locate and reap stale dev instances that
 ## lock target\debug\<bin>.exe and break cargo linking.
-$BIN_NAME = "tomato-novel-downloader"
+$BIN_NAME = "unified-novel-downloader"
 
 # ============================================================================
 # End of configuration
@@ -307,14 +311,32 @@ if (-not $javaExe) {
 $javaVersion = & { $ErrorActionPreference = "Continue"; (java -version 2>&1 | Select-Object -First 1) } -replace '"', ''
 Write-OK "Java: $javaVersion ($javaExe)"
 
-# Check JAR
+# Check/Build sidecar JAR —— 关键代码已并入 java-sidecar/；桌面首次自动构建（手机不需要这步）
 if (-not (Test-Path $JAR_PATH)) {
-    Write-Err "JAR not found: $JAR_PATH"
-    Write-Host ""
-    Write-Host "Edit run-dev.ps1 and set `$JAR_PATH to your unidbg-boot-server.jar location." -ForegroundColor Yellow
-    exit 1
+    Write-Step "未找到 sidecar jar，尝试本地构建（首次会下载 Maven/依赖，较慢）..."
+    $buildScript = Join-Path $SIDECAR_DIR "tools\build.ps1"
+    if (Test-Path $buildScript) {
+        & $buildScript
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $JAR_PATH)) {
+            Write-Err "sidecar 构建失败；可手动运行: $buildScript"
+            exit 1
+        }
+    } else {
+        Write-Err "缺少 jar 且找不到构建脚本: $buildScript"
+        exit 1
+    }
 }
 Write-OK "JAR: $JAR_PATH"
+
+# Ensure APK assets —— 签名 .so 由 sidecar 首启从 APK 抽取；APK 不进仓库。
+# 需已设置 SIDECAR_APK_URL 或 SIDECAR_APK_LOCAL，否则仅提示（sidecar 将无法签名）。
+$fetchScript = Join-Path $SIDECAR_DIR "tools\fetch_assets.ps1"
+if (Test-Path $fetchScript) {
+    & $fetchScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Step "APK 未就位（SIDECAR_APK_URL/LOCAL 未设置）。番茄签名会失败，其余源不受影响。"
+    }
+}
 
 # Check cargo - Get-Command fails on non-ASCII PATH entries (e.g. Chinese username)
 $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
@@ -368,7 +390,7 @@ if ($useWatch) {
 # ============================================================================
 # Windows locks a running .exe, so a leftover dev binary (orphaned cargo-watch
 # child, IDE debug launch, manual `cargo run`) makes cargo die with:
-#   error: failed to remove file `...\target\debug\tomato-novel-downloader.exe`
+#   error: failed to remove file `...\target\debug\unified-novel-downloader.exe`
 # Reap it (and stale sidecar JVMs) before building, then wait for the OS to
 # release the file handle.
 $webPort = ($WEB_ADDR -split ':')[1]
@@ -491,8 +513,8 @@ Write-Host "    Signature endpoint: http://127.0.0.1:$SIDECAR_PORT/api/fq-signat
 Write-Header "Starting Rust Binary (port $WEB_ADDR)"
 
 # Set environment variables
-$env:TOMATO_WEB_ADDR     = $WEB_ADDR
-$env:TOMATO_WEB_PASSWORD = $WEB_PASSWORD
+$env:UNIFIED_WEB_ADDR     = $WEB_ADDR
+$env:UNIFIED_WEB_PASSWORD = $WEB_PASSWORD
 $env:RUST_LOG            = "debug"
 
 $featureFlag   = if ($CARGO_FEATURES) { "--features", $CARGO_FEATURES } else { @() }

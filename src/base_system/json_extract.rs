@@ -1,6 +1,6 @@
 //! JSON 提取与容错解析工具。
 
-#![cfg_attr(not(feature = "official-api"), allow(dead_code))]
+#![allow(dead_code)]
 
 use serde_json::Value;
 

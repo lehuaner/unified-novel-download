@@ -5,10 +5,14 @@ fn main() {
         #[cfg(windows)]
         {
             use winres::WindowsResource;
-            WindowsResource::new()
-                .set_icon("img/app.ico")
-                .compile()
-                .expect("failed to embed Windows icon");
+            let mut res = WindowsResource::new();
+            res.set_icon("img/app.ico");
+            // 补齐 exe 文件属性（否则“详细信息”里显示的是 Cargo 包名）。
+            res.set("ProductName", "Unified Novel Downloader");
+            res.set("FileDescription", "Unified Novel Downloader");
+            res.set("OriginalFilename", "unified-novel-downloader.exe");
+            res.set("LegalCopyright", "MIT License");
+            res.compile().expect("failed to embed Windows resources");
         }
     }
 }

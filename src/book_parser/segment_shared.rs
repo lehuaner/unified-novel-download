@@ -2,7 +2,7 @@
 //!
 //! 被 `book_parser::finalize_epub` 和 `download::segment_pool` 共同引用。
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
@@ -11,7 +11,7 @@ use serde_json::Value;
 
 // ── 段评缓存类型 ─────────────────────────────────────────────────
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SegmentCommentsParaCache {
     pub(crate) count: u64,
@@ -19,7 +19,7 @@ pub(crate) struct SegmentCommentsParaCache {
     pub(crate) detail: Option<tomato_novel_official_api::ReviewResponse>,
 }
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SegmentCommentsChapterCache {
     #[allow(dead_code)]
@@ -101,7 +101,7 @@ pub(crate) fn extract_item_version_map(directory_raw: &Value) -> HashMap<String,
     out
 }
 
-#[cfg(feature = "official-api")]
+#[cfg(any())]
 pub(crate) fn extract_para_counts_from_stats(stats: &Value) -> serde_json::Map<String, Value> {
     let mut out = serde_json::Map::new();
 

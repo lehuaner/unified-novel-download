@@ -30,8 +30,6 @@ pub(crate) fn build_router(state: AppState) -> Router {
             get(routes::index::asset_icon_qmnovel),
         )
         .route("/api/login", post(routes::auth::api_login))
-        .route("/api/status", get(routes::status::api_status))
-        .route("/api/app_update", get(routes::app_update::api_app_update))
         .route(
             "/api/self_update",
             get(routes::app_update::api_self_update_status)
@@ -107,8 +105,7 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/jobs/:id/format",
             post(routes::jobs::submit_format_choice),
         )
-        .route("/api/updates", get(routes::updates::api_updates))
-        .route("/api/history", get(routes::history::api_history));
+        .route("/api/updates", get(routes::updates::api_updates));
 
     protected
         .layer(from_fn_with_state(state.clone(), auth_and_log_mw))
@@ -138,7 +135,8 @@ async fn auth_and_log_mw(
         if !allow {
             let provided_header = req
                 .headers()
-                .get("x-tomato-password")
+                .get("x-unified-password")
+                .or_else(|| req.headers().get("x-tomato-password"))
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
 
@@ -147,7 +145,10 @@ async fn auth_and_log_mw(
                 .get(axum::http::header::COOKIE)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|raw| {
-                    cookie_value(raw, "tomato_session")
+                    cookie_value(raw, "undl_session")
+                        .or_else(|| cookie_value(raw, "undl_device"))
+                        // 兼容改名前下发的旧 Cookie，避免升级后已登录/受信设备被迫重新登录。
+                        .or_else(|| cookie_value(raw, "tomato_session"))
                         .or_else(|| cookie_value(raw, "tomato_device"))
                         .or_else(|| cookie_value(raw, "auth_token"))
                 });

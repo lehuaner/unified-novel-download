@@ -101,8 +101,6 @@ pub struct Config {
     pub save_path: String,
 
     // API 配置
-    #[serde(default = "default_true")]
-    pub use_official_api: bool,
     #[serde(default)]
     pub api_endpoints: Vec<String>,
     /// unidbg 签名 sidecar 地址（如 `http://127.0.0.1:8099`）。
@@ -201,7 +199,6 @@ impl Default for Config {
             audiobook_tts_api_token: default_string(),
             audiobook_tts_model: default_string(),
             save_path: String::new(),
-            use_official_api: default_true(),
             api_endpoints: Vec::new(),
             unidbg_signer_url: String::new(),
             enable_segment_comments: default_false(),
@@ -235,7 +232,7 @@ impl ConfigSpec for Config {
     const FILE_NAME: &'static str = "config.yml";
 
     fn fields() -> &'static [FieldMeta] {
-        static FIELDS: [FieldMeta; 45] = [
+        static FIELDS: [FieldMeta; 44] = [
             FieldMeta {
                 name: "old_cli",
                 description: "是否使用老版本命令行界面",
@@ -327,10 +324,6 @@ impl ConfigSpec for Config {
             FieldMeta {
                 name: "save_path",
                 description: "保存路径",
-            },
-            FieldMeta {
-                name: "use_official_api",
-                description: "使用官方API",
             },
             FieldMeta {
                 name: "api_endpoints",

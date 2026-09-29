@@ -29,10 +29,6 @@ use ratatui::prelude::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
-#[cfg(feature = "official-api")]
-use serde_json::Value;
-#[cfg(feature = "official-api")]
-use tomato_novel_official_api::{SearchClient, SearchError};
 use tracing::{info, warn};
 
 mod about;
@@ -50,8 +46,6 @@ use history::show_history_menu;
 use update::show_update_menu;
 
 use crate::base_system::context::Config;
-#[cfg(feature = "official-api")]
-use crate::base_system::json_extract;
 use crate::base_system::logging::{redact_log_endpoints, take_broadcast_rx};
 use crate::download::downloader::{BookMeta, ChapterRange, DownloadPlan, ProgressSnapshot};
 use crate::prewarm_state;
@@ -172,28 +166,6 @@ struct BookDetail {
     cover_primary_color: Option<String>,
 }
 
-#[cfg(feature = "official-api")]
-impl BookDetail {
-    fn has_data(&self) -> bool {
-        self.description.is_some()
-            || !self.tags.is_empty()
-            || self.chapter_count.is_some()
-            || self.finished.is_some()
-            || self.cover_url.is_some()
-            || self.detail_cover_url.is_some()
-            || self.word_count.is_some()
-            || self.score.is_some()
-            || self.read_count.is_some()
-            || self.read_count_text.is_some()
-            || self.book_short_name.is_some()
-            || self.original_book_name.is_some()
-            || self.first_chapter_title.is_some()
-            || self.last_chapter_title.is_some()
-            || self.category.is_some()
-            || self.cover_primary_color.is_some()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(super) struct PendingDownload {
     plan: DownloadPlan,
@@ -287,12 +259,9 @@ pub(super) struct App {
     // log
     log_rx: Option<crossbeam_channel::Receiver<String>>,
 
-    // iid
-    iid_prewarm_active: bool,
+    // iid（仅保留错误提示；启动预热动画已随官方 API 分支一并移除）
     iid_prewarm_error: Option<String>,
     iid_prewarm_error_seen: Option<String>,
-    prewarm_spinner_idx: usize,
-    prewarm_spinner_last: Instant,
 
     // preview modal
     preview_focus: PreviewFocus,
@@ -435,11 +404,8 @@ impl App {
             spinner_last: Instant::now(),
             pending_download: None,
             log_rx: take_broadcast_rx(),
-            iid_prewarm_active: prewarm_state::is_prewarm_in_progress(),
             iid_prewarm_error: None,
             iid_prewarm_error_seen: None,
-            prewarm_spinner_idx: 0,
-            prewarm_spinner_last: Instant::now(),
             preview_focus: PreviewFocus::Range,
             preview_buttons,
             preview_range: String::new(),
@@ -563,14 +529,12 @@ fn run_loop(
 
     loop {
         tick_spinner(&mut app);
-        tick_prewarm_spinner(&mut app);
         poll_worker(&mut app)?;
         drain_log_channel(&mut app);
         sync_prewarm_state(&mut app);
 
         terminal.draw(|f| {
             draw_ui(f, &mut app);
-            render_prewarm_overlay(f, &app);
             render_iid_error_overlay(f, &app);
         })?;
 
@@ -847,149 +811,160 @@ fn render_format_modal(frame: &mut ratatui::Frame, app: &mut App) {
     app.last_format_modal_list = Some(parts[1]);
 }
 
-#[cfg(feature = "official-api")]
-fn search_books(query: &str) -> Result<Vec<SearchItem>> {
-    let started = Instant::now();
-    let client = SearchClient::new()
-        .inspect_err(|err| {
-            log_search_error(
-                "client_init",
-                query,
-                started.elapsed().as_millis() as u64,
-                err,
-            );
-        })
-        .context("init SearchClient")?;
-    let resp = client
-        .search_books(query)
-        .inspect_err(|err| {
-            log_search_error(
-                "upstream_request",
-                query,
-                started.elapsed().as_millis() as u64,
-                err,
-            );
-        })
-        .context("search_books")?;
-    let mut results = Vec::new();
-    for book in resp.books {
-        let title = book.title.unwrap_or_default();
-        let author = book.author.unwrap_or_default();
-        let detail = detail_from_search(&book.raw);
-        let detail = if detail.has_data() {
-            Some(detail)
-        } else {
-            None
-        };
-
-        results.push(SearchItem {
-            title,
-            author,
-            book_id: book.book_id,
-            detail,
-        });
+/// TUI 多源搜索：番茄（需配置 unidbg sidecar）+ 书旗 + 七猫，聚合后按 book_id 去重。
+///
+/// 各源 `search_items` 输出的 `book_id` 已带 `sq:` / `qm:` 前缀，可直接交给
+/// `start_preview_task`，走的正是与 Web UI 相同的 provider 路由。
+fn search_books(cfg: &Config, query: &str) -> Result<Vec<SearchItem>> {
+    let keyword = query.trim();
+    if keyword.is_empty() {
+        return Ok(Vec::new());
     }
-    info!(
-        target: "search",
-        surface = "tui",
-        query,
-        result_count = results.len(),
-        elapsed_ms = started.elapsed().as_millis() as u64,
-        "搜索请求完成"
-    );
+
+    let timeout_secs = cfg.request_timeout.max(10);
+    let mut raw_items: Vec<serde_json::Value> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+
+    // 番茄：走本地 unidbg 签名 sidecar 直连；未配置时跳过（与 Web UI 行为一致）。
+    let signer_url = cfg.unidbg_signer_url.trim().to_string();
+    if !signer_url.is_empty() {
+        let searched = crate::third_party::fq_api_client::FqApiClient::new(
+            &signer_url,
+            timeout_secs.saturating_mul(1000),
+        )
+        .and_then(|client| client.search_enriched(keyword, 1, None, 0));
+        match searched {
+            Ok(resp) => {
+                if let Some(arr) = resp.get("items").and_then(serde_json::Value::as_array) {
+                    raw_items.extend(arr.iter().cloned());
+                }
+            }
+            Err(err) => errors.push(format!("番茄搜索失败: {err}")),
+        }
+    }
+
+    // 书旗
+    #[cfg(feature = "shuqi")]
+    {
+        let shuqi = crate::shuqi::ShuqiClient::new(timeout_secs)
+            .and_then(|client| crate::shuqi::search_items(&client, keyword, 1));
+        match shuqi {
+            Ok((items, _has_more)) => raw_items.extend(items),
+            Err(err) => errors.push(format!("书旗搜索失败: {err}")),
+        }
+    }
+
+    // 七猫
+    #[cfg(feature = "qimao")]
+    {
+        let qimao = crate::qimao::QimaoClient::new(timeout_secs)
+            .and_then(|client| crate::qimao::search_items(&client, keyword, 1, None, None));
+        match qimao {
+            Ok((items, _has_more)) => raw_items.extend(items),
+            Err(err) => errors.push(format!("七猫搜索失败: {err}")),
+        }
+    }
+
+    let mut results: Vec<SearchItem> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for item in &raw_items {
+        let Some(search_item) = search_item_from_value(item) else {
+            continue;
+        };
+        if seen.insert(search_item.book_id.clone()) {
+            results.push(search_item);
+        }
+    }
+
+    // 一个结果都没有时：全部源报错则把错误透出，避免把“接口失败”误显示成“没找到书”。
+    if results.is_empty() && !errors.is_empty() {
+        return Err(anyhow::anyhow!(errors.join("；")));
+    }
+
     Ok(results)
 }
 
-#[cfg(feature = "official-api")]
-fn log_search_error(stage: &str, query: &str, elapsed_ms: u64, err: &SearchError) {
-    let error_kind = match err {
-        SearchError::Iid(_) => "iid",
-        SearchError::Http(_) => "network",
+/// 将各源返回的搜索结果归一为 `SearchItem`（字段名在各源之间略有差异，逐个兼容）。
+fn search_item_from_value(v: &serde_json::Value) -> Option<SearchItem> {
+    let pick_str = |keys: &[&str]| -> String {
+        keys.iter()
+            .find_map(|k| v.get(*k).and_then(serde_json::Value::as_str))
+            .unwrap_or_default()
+            .trim()
+            .to_string()
     };
-    warn!(
-        target: "search",
-        surface = "tui",
-        stage,
-        error_kind,
-        query,
-        elapsed_ms,
-        error = %err,
-        error_debug = ?err,
-        "搜索请求失败"
-    );
-}
 
-#[cfg(not(feature = "official-api"))]
-fn search_books(_query: &str) -> Result<Vec<SearchItem>> {
-    anyhow::bail!("当前构建未启用 official-api feature，搜索功能不可用")
-}
-
-#[cfg(feature = "official-api")]
-fn detail_from_search(raw: &Value) -> BookDetail {
-    let maps = json_extract::collect_maps(raw);
-
-    let description = maps.iter().find_map(|m| {
-        json_extract::pick_string(
-            m,
-            &[
-                "abstract",
-                "desc",
-                "description",
-                "brief",
-                "intro",
-                "summary",
-                "recommendation_reason",
-                "book_abstract",
-            ],
-        )
-    });
-    let tags = maps
-        .iter()
-        .find_map(|m| json_extract::pick_tags_opt(m))
-        .unwrap_or_default();
-    let cover_url = maps.iter().find_map(|m| json_extract::pick_cover(m));
-    let detail_cover_url = maps.iter().find_map(|m| json_extract::pick_detail_cover(m));
-    let word_count = maps.iter().find_map(|m| json_extract::pick_word_count(m));
-    let score = maps.iter().find_map(|m| json_extract::pick_score(m));
-    let read_count = maps.iter().find_map(|m| json_extract::pick_read_count(m));
-    let read_count_text = maps
-        .iter()
-        .find_map(|m| json_extract::pick_read_count_text(m));
-    let book_short_name = maps
-        .iter()
-        .find_map(|m| json_extract::pick_book_short_name(m));
-    let original_book_name = maps
-        .iter()
-        .find_map(|m| json_extract::pick_original_book_name(m));
-    let first_chapter_title = maps
-        .iter()
-        .find_map(|m| json_extract::pick_first_chapter_title(m));
-    let last_chapter_title = maps
-        .iter()
-        .find_map(|m| json_extract::pick_last_chapter_title(m));
-    let category = maps.iter().find_map(|m| json_extract::pick_category(m));
-    let cover_primary_color = maps
-        .iter()
-        .find_map(|m| json_extract::pick_cover_primary_color(m));
-
-    BookDetail {
-        description,
-        tags,
-        chapter_count: None,
-        finished: None,
-        cover_url,
-        detail_cover_url,
-        word_count,
-        score,
-        read_count,
-        read_count_text,
-        book_short_name,
-        original_book_name,
-        first_chapter_title,
-        last_chapter_title,
-        category,
-        cover_primary_color,
+    let book_id = match v.get("book_id") {
+        Some(serde_json::Value::String(s)) => s.trim().to_string(),
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    };
+    if book_id.is_empty() {
+        return None;
     }
+
+    let title = pick_str(&["title", "book_name", "bookName"]);
+    if title.is_empty() {
+        return None;
+    }
+
+    let non_empty = |s: String| (!s.is_empty()).then_some(s);
+    let description = ["description", "raw", "blurb"]
+        .iter()
+        .find_map(|k| v.get(*k).and_then(serde_json::Value::as_str))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let cover_url = ["cover_url", "cover", "imgUrl"]
+        .iter()
+        .find_map(|k| v.get(*k).and_then(serde_json::Value::as_str))
+        .map(|s| s.trim().to_string())
+        .filter(|s| s.starts_with("http://") || s.starts_with("https://"));
+    let tags = v
+        .get("tags")
+        .and_then(serde_json::Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let count_of = |key: &str| {
+        v.get(key)
+            .and_then(serde_json::Value::as_u64)
+            .map(|x| x as usize)
+    };
+    let score = v.get("score").and_then(|s| {
+        s.as_f64()
+            .map(|f| f as f32)
+            .or_else(|| s.as_str().and_then(|t| t.trim().parse::<f32>().ok()))
+    });
+
+    Some(SearchItem {
+        title,
+        author: pick_str(&["author", "author_name", "authorName"]),
+        book_id,
+        detail: Some(BookDetail {
+            description,
+            tags,
+            chapter_count: count_of("chapter_count"),
+            finished: v.get("finished").and_then(serde_json::Value::as_bool),
+            cover_url: cover_url.clone(),
+            detail_cover_url: cover_url,
+            word_count: count_of("word_count"),
+            score,
+            read_count_text: non_empty(pick_str(&[
+                "read_count_text",
+                "readCount",
+                "visit_count",
+                "bottom_text",
+            ])),
+            category: non_empty(pick_str(&["category"])),
+            ..Default::default()
+        }),
+    })
 }
 
 fn detail_from_meta(meta: &BookMeta) -> BookDetail {
@@ -1258,56 +1233,6 @@ fn render_log_box(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     frame.render_widget(log, area);
 }
 
-fn render_prewarm_overlay(frame: &mut ratatui::Frame, app: &App) {
-    if !app.iid_prewarm_active {
-        return;
-    }
-
-    let area = frame.size();
-    let width = 28;
-    let height = 5;
-    let x = area.x.saturating_add(area.width.saturating_sub(width + 1));
-    let y = area.y;
-    let overlay = Rect {
-        x,
-        y,
-        width: width.min(area.width),
-        height: height.min(area.height),
-    };
-
-    let inner = Rect {
-        x: overlay.x.saturating_add(1),
-        y: overlay.y.saturating_add(1),
-        width: overlay.width.saturating_sub(2).max(1),
-        height: overlay.height.saturating_sub(2).max(1),
-    };
-
-    let spinner = SPINNER_FRAMES[(app.prewarm_spinner_idx) % SPINNER_FRAMES.len()];
-    let text = format!(" IID 预热中… {}", spinner);
-    let lines = vec![
-        Line::from(Span::styled(
-            " 初始化",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(text, Style::default().fg(Color::Yellow))),
-    ];
-
-    frame.render_widget(Clear, overlay);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title("正在预热 IID")
-        .title_alignment(Alignment::Right);
-    frame.render_widget(block, overlay);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .alignment(Alignment::Left)
-            .wrap(Wrap { trim: true }),
-        inner,
-    );
-}
-
 fn render_iid_error_overlay(frame: &mut ratatui::Frame, app: &App) {
     let Some(err) = app.iid_prewarm_error.as_deref() else {
         return;
@@ -1338,7 +1263,9 @@ fn render_iid_error_overlay(frame: &mut ratatui::Frame, app: &App) {
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from("番茄官方接口需要访问 log.snssdk.com 注册 IID。"),
+        Line::from(
+            "番茄内容接口需要访问 log.snssdk.com 注册 IID（由本地签名服务或第三方端点使用）。",
+        ),
         Line::from("公司/校园网、DNS 过滤、代理规则或 AdGuard/uBlock 可能会拦截该域名。"),
         Line::from("请放行 log.snssdk.com，或临时关闭相关拦截后重试。"),
         Line::from(""),
@@ -1484,9 +1411,6 @@ fn drain_log_channel(app: &mut App) {
 }
 
 fn sync_prewarm_state(app: &mut App) {
-    if app.iid_prewarm_active && !prewarm_state::is_prewarm_in_progress() {
-        app.iid_prewarm_active = false;
-    }
     if let Some(err) = prewarm_state::prewarm_error()
         && app.iid_prewarm_error_seen.as_deref() != Some(err.as_str())
     {
@@ -1516,17 +1440,6 @@ pub(super) fn maybe_show_iid_failure(app: &mut App, err: impl AsRef<str>) {
         "IID 注册失败：请检查 log.snssdk.com 是否被公司/校园网或 AdGuard 等拦截".to_string();
     app.push_message("IID 注册失败：请放行 log.snssdk.com 或关闭反广告/代理/DNS 拦截后重试");
     app.push_log(redact_log_endpoints(&message));
-}
-
-fn tick_prewarm_spinner(app: &mut App) {
-    if !app.iid_prewarm_active {
-        return;
-    }
-    if app.prewarm_spinner_last.elapsed() < Duration::from_millis(140) {
-        return;
-    }
-    app.prewarm_spinner_idx = (app.prewarm_spinner_idx + 1) % SPINNER_FRAMES.len();
-    app.prewarm_spinner_last = Instant::now();
 }
 
 pub(super) fn switch_view(app: &mut App, action: MenuAction) -> Result<()> {
@@ -1565,8 +1478,10 @@ pub(super) fn start_search_task(app: &mut App, query: String) -> Result<()> {
     info!(target: "ui", "开始搜索: {query}");
     start_spinner(app, "搜索中…");
     let tx = app.worker_tx.clone();
+    // 搜索需要 unidbg 地址与超时配置，按值 clone 给工作线程，避开与主循环的借用冲突。
+    let cfg = app.config.clone();
     thread::spawn(move || {
-        let result = search_books(&query);
+        let result = search_books(&cfg, &query);
         let _ = tx.send(WorkerMsg::SearchDone(result));
     });
     Ok(())

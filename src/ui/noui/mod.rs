@@ -43,22 +43,16 @@ pub fn run(config: &mut Config) -> Result<()> {
     let _ = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
 
     println!(
-        "欢迎使用番茄小说下载器! v{}\n\
+        "欢迎使用 Unified Novel Downloader v{}\n\
 项目地址: https://github.com/lehuaner/unified-novel-download \n\
 Fork From: https://github.com/Dlmily/Tomato-Novel-Downloader-Lite \n\
-作者: zhongbai233 (https://github.com/zhongbai2333) \n\
+作者: lehuaner (https://github.com/lehuaner) \n\
 项目早期代码: Dlmily (https://github.com/Dlmily) \n\
 \n\
-项目说明: 此项目基于Dlmily的项目Fork而来, 我对其进行重构 + 优化, 添加更对功能, 包括: EPUB下载支持、更好的断点传输、更好的错误管理等特性 \n\
-本项目[完全]基于第三方API, [未]使用官方API, 如有需要可以查看Dlmily的项目 \n\
+项目说明: 此项目基于 Dlmily 的项目 Fork 而来，经过完全重构，支持番茄 / 书旗 / 七猫三个小说源，\n\
+并提供 EPUB 下载、断点续传、有声小说、TUI / Web UI 等能力。\n\
 本项目仅供网络爬虫技术、网页数据处理及相关研究的学习用途。请勿将其用于任何违反法律法规或侵犯他人权益的活动。",
         env!("CARGO_PKG_VERSION")
-    );
-
-    #[cfg(feature = "official-api")]
-    println!(
-        "\n【免费声明】本程序完全免费，若发现收费渠道，请勿上当受骗！\n\
-      官方仓库: https://github.com/lehuaner/unified-novel-download"
     );
 
     // 每次启动检查程序更新（不影响后续流程，失败直接忽略）。

@@ -69,7 +69,7 @@ pub(crate) async fn api_login(
     let token = auth.issue_session_token();
     let secure_attr = if auth.cookie_secure() { "; Secure" } else { "" };
     let cookie = format!(
-        "tomato_session={}; Path=/; HttpOnly; SameSite=Lax{}; Max-Age={}",
+        "undl_session={}; Path=/; HttpOnly; SameSite=Lax{}; Max-Age={}",
         token,
         secure_attr,
         auth.session_ttl_secs()
@@ -77,7 +77,7 @@ pub(crate) async fn api_login(
     // 受信设备长效 Cookie：登录一次后该设备长期免密（跨重启，由持久化密钥保障）。
     let device_token = auth.issue_device_token();
     let device_cookie = format!(
-        "tomato_device={}; Path=/; HttpOnly; SameSite=Lax{}; Max-Age={}",
+        "undl_device={}; Path=/; HttpOnly; SameSite=Lax{}; Max-Age={}",
         device_token,
         secure_attr,
         auth.device_ttl_secs()
@@ -89,6 +89,7 @@ pub(crate) async fn api_login(
         secure_attr,
         auth.session_ttl_secs()
     );
+    // 清理早期版本遗留的明文密码 Cookie（名为历史 tomato 前缀，读取侧仍兼容旧 session/device 名）。
     let clear_legacy_cookie = format!(
         "tomato_pw=; Path=/; HttpOnly; SameSite=Lax{}; Max-Age=0",
         secure_attr

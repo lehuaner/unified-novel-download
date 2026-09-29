@@ -1,6 +1,6 @@
 //! 进度上报与 CLI 进度条管理。
 
-#![cfg_attr(not(feature = "official-api"), allow(dead_code))]
+#![allow(dead_code)]
 
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 
@@ -127,16 +127,9 @@ impl ProgressReporter {
 
 // ── 构造函数 ──────────────────────────────────────────────────
 
-pub(crate) fn segment_enabled(cfg: &Config) -> bool {
-    #[cfg(feature = "official-api")]
-    {
-        cfg.enable_segment_comments && cfg.novel_format.eq_ignore_ascii_case("epub")
-    }
-    #[cfg(not(feature = "official-api"))]
-    {
-        let _ = cfg;
-        false
-    }
+pub(crate) fn segment_enabled(_cfg: &Config) -> bool {
+    // 段评拉取依赖官方 API 通道；当前唯一构建方案（第三方解析）不支持，恒定关闭。
+    false
 }
 
 pub(crate) fn make_reporter(
@@ -148,10 +141,7 @@ pub(crate) fn make_reporter(
     let total = chosen.len();
     let group_total = dynamic_group_count(pending.len());
 
-    let use_cli_bars = progress.is_none()
-        && config.use_official_api
-        && config.max_workers.max(1) <= 1
-        && !pending.is_empty();
+    let use_cli_bars = progress.is_none() && config.max_workers.max(1) <= 1 && !pending.is_empty();
 
     let cli = if use_cli_bars {
         let mp = MultiProgress::with_draw_target(ProgressDrawTarget::stderr());

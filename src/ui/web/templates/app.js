@@ -1,6 +1,9 @@
-/* ===== Tomato Novel Downloader – WebUI ===== */
+/* ===== Unified Novel Downloader – WebUI ===== */
 
 let loginPromise = null;
+// isDockerBuild：原唯一赋值点在状态页 refreshStatus()（读取 /api/status 的 docker_build），
+// 该函数已随状态页死代码一并移除，这里保留显式默认值以维持既有分支结果（当前恒为 false，
+// 等价于“非 Docker 构建”）。如需恢复 Docker 自更新限制，请重新接入 /api/status 后再赋值。
 let isDockerBuild = false;
 let lastIidWarningMessage = null;
 
@@ -781,40 +784,7 @@ async function refreshTab() {
   renderToolbar();
 }
 
-// 文件卡片：下载库目录里的实际文件/文件夹（与 bookCard 同为卡片体系）。
-function fileCard(it) {
-  const kind = it.kind || 'file';
-  const rel = it.rel_path || '';
-  const name = it.name || rel;
-  const encoded = encodePathSegments(rel);
-  const hrefFile = `/download/${encoded}`;
-  const hrefZip = `/download-zip/${encoded}`;
-  const sizeText = kind === 'dir'
-    ? (it.file_count == null ? '文件夹' : `${fmtBytes(it.size)} · ${Number(it.file_count || 0)} 文件`)
-    : fmtBytes(it.size);
-  const timeText = fmtTime(it.modified_ms);
-  const ext = (it.ext || '').toString().toUpperCase();
-  const badge = kind === 'dir'
-    ? '<span class="tag tag-blue">文件夹</span>'
-    : (ext ? `<span class="tag">${esc(ext)}</span>` : '');
-  const icon = kind === 'dir' ? '📁' : '📄';
-  const actions = kind === 'dir'
-    ? `<button type="button" class="openDir sm" data-path="${esc(rel)}">打开</button>` +
-      `<a class="file-dl-btn" href="${hrefZip}">打包下载</a>`
-    : `<a class="file-dl-btn primary" href="${hrefFile}" download>下载</a>`;
-  return `
-    <div class="file-card">
-      <div class="file-card-icon">${icon}</div>
-      <div class="file-card-body">
-        <div class="file-card-name" title="${esc(name)}">${esc(name)}</div>
-        <div class="file-card-meta">${badge}<span>${esc(sizeText)}</span><span>${esc(timeText)}</span></div>
-      </div>
-      <div class="file-card-actions">${actions}</div>
-    </div>`;
-}
-
 // ── 前端“只删除显示”隐藏集合（localStorage，不动后端） ──────────
-const HIDDEN_RECORDS_KEY = 'tnd.hidden_records';
 const HIDDEN_JOBS_KEY = 'tnd.hidden_jobs';
 
 function loadIdSet(key) {
@@ -823,28 +793,6 @@ function loadIdSet(key) {
 }
 function saveIdSet(key, set) { try { localStorage.setItem(key, JSON.stringify([...set])); } catch {} }
 function addHidden(key, id) { const s = loadIdSet(key); s.add(String(id)); saveIdSet(key, s); }
-function clearHidden(key) { try { localStorage.removeItem(key); } catch {} }
-
-// ── 精简书籍卡片（缩略图 + 书名 + 作者） ───────────────────
-function miniCoverError(el) {
-  const d = document.createElement('div');
-  d.className = 'mini-cover cover-failed';
-  d.textContent = (el && el.getAttribute('data-initial')) || '?';
-  if (el && el.replaceWith) el.replaceWith(d);
-}
-
-// o: {cover,title,author,meta,actions,dataAttrs,cardClass}
-function miniBookCard(o) {
-  o = o || {};
-  const cs = coverSrc(o.cover);
-  const initial = esc((o.title || '?').toString().trim().slice(0, 1) || '?');
-  const coverHtml = cs
-    ? `<img class="mini-cover" src="${esc(cs)}" alt="" loading="lazy" data-initial="${initial}" onerror="miniCoverError(this)">`
-    : `<div class="mini-cover cover-failed">${initial}</div>`;
-  const metaHtml = o.meta ? `<div class="mini-meta">${o.meta}</div>` : '';
-  const actionsHtml = o.actions ? `<div class="mini-actions">${o.actions}</div>` : '';
-  return `<div class="mini-card${o.cardClass ? ' ' + o.cardClass : ''}" ${o.dataAttrs || ''}>${coverHtml}<div class="mini-body"><div class="mini-title" title="${esc(o.title || '')}">${esc(o.title || '未知')}</div><div class="mini-author">${esc(o.author || '未知作者')}</div>${metaHtml}${actionsHtml}</div></div>`;
-}
 
 // 进行中任务卡片：与成品书卡同一套 bookCard 结构（封面/书名/作者/meta/简介/底栏），
 // 差别只在底栏左侧用进度条代替“可更新”角标、右侧操作按钮换为任务操作（图标化、右对齐）。
@@ -1009,523 +957,14 @@ function buildCoverCandidates(preview, hintCoverUrl) {
   return [...nonHeic, ...heic];
 }
 
-// ── App Update ─────────────────────────────────────────────────────
-
-const DISMISS_KEY = 'tnd.dismissed_release_tag';
-let selfUpdatePollTimer = null;
-let selfUpdateWasRunning = false;
-let selfUpdateRestartWaiting = false;
-
-function getDismissedTag() {
-  try { return (localStorage.getItem(DISMISS_KEY) || '').toString(); } catch { return ''; }
-}
-function setDismissedTag(tag) {
-  try { localStorage.setItem(DISMISS_KEY, (tag || '').toString()); } catch {}
-}
-
-function showAppUpdateBanner(show) {
-  const el = document.getElementById('appUpdateBanner');
-  if (el) el.classList.toggle('hidden', !show);
-}
-
-function renderSelfUpdateStatus(status) {
-  const wrap = document.getElementById('selfUpdateProgressWrap');
-  const stage = document.getElementById('selfUpdateStage');
-  const msg = document.getElementById('selfUpdateMessage');
-  const bar = document.getElementById('selfUpdateProgressBar');
-  const pct = document.getElementById('selfUpdatePercent');
-  if (!wrap || !stage || !msg || !bar || !pct) return;
-
-  const st = (status?.state || 'idle').toString();
-  const percent = Number(status?.percent || 0);
-  const show = st !== 'idle';
-  wrap.classList.toggle('hidden', !show);
-  if (!show) return;
-
-  stage.textContent = (status?.stage || 'idle').toString();
-  msg.textContent = (status?.message || '').toString();
-  bar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  pct.textContent = `${Math.max(0, Math.min(100, percent))}%`;
-}
-
-async function pollSelfUpdateStatus() {
-  try {
-    const status = await j('/api/self_update');
-    renderSelfUpdateStatus(status);
-
-    const st = (status?.state || '').toString();
-    const stage = (status?.stage || '').toString();
-    if (st === 'running') {
-      selfUpdateWasRunning = true;
-      selfUpdateRestartWaiting = false;
-      if (!selfUpdatePollTimer) {
-        selfUpdatePollTimer = setInterval(() => {
-          pollSelfUpdateStatus().catch(() => {});
-        }, 1000);
-      }
-    } else {
-      if (selfUpdatePollTimer) {
-        clearInterval(selfUpdatePollTimer);
-        selfUpdatePollTimer = null;
-      }
-      // Detect restart scenarios
-      if (selfUpdateWasRunning && !selfUpdateRestartWaiting) {
-        if (st === 'done' && stage === 'restart') {
-          // finish_done("restart") was called before exit — wait for new process
-          startWaitingForRestart();
-        } else if (st === 'idle') {
-          // New process started with fresh state — page needs reload
-          window.location.reload();
-        }
-      }
-    }
-  } catch {
-    // Network error — if update was in progress, server likely restarted
-    if (selfUpdateWasRunning && !selfUpdateRestartWaiting) {
-      startWaitingForRestart();
-    }
-  }
-}
-
-function startWaitingForRestart() {
-  selfUpdateRestartWaiting = true;
-  if (selfUpdatePollTimer) {
-    clearInterval(selfUpdatePollTimer);
-    selfUpdatePollTimer = null;
-  }
-
-  // Push progress bar to 100%
-  const wrap = document.getElementById('selfUpdateProgressWrap');
-  const bar = document.getElementById('selfUpdateProgressBar');
-  const pct = document.getElementById('selfUpdatePercent');
-  const stageEl = document.getElementById('selfUpdateStage');
-  const msgEl = document.getElementById('selfUpdateMessage');
-  if (wrap) wrap.classList.remove('hidden');
-  if (bar) bar.style.width = '100%';
-  if (pct) pct.textContent = '100%';
-  if (stageEl) stageEl.textContent = 'restart';
-  if (msgEl) msgEl.textContent = '服务重启中，等待重连…';
-
-  const hint = document.getElementById('appUpdateHint');
-  if (hint) hint.textContent = '更新完成，等待服务重启…';
-
-  // Poll /api/status every 2 s; reload once the new process responds
-  const reconnTimer = setInterval(async () => {
-    try {
-      await fetchWithCreds('/api/status');
-      clearInterval(reconnTimer);
-      if (msgEl) msgEl.textContent = '服务已重启，正在刷新页面…';
-      if (hint) hint.textContent = '更新完成，正在刷新…';
-      setTimeout(() => window.location.reload(), 600);
-    } catch {
-      // still offline, keep waiting
-    }
-  }, 2000);
-}
-
-function applyDockerUpdateUi() {
-  if (!isDockerBuild) return;
-  const hint = document.getElementById('appUpdateHint');
-  if (hint) hint.textContent = 'Docker 构建已禁用程序自更新，请通过重新拉取镜像升级。';
-  showAppUpdateBanner(false);
-  const btn = document.getElementById('appUpdateCheck');
-  if (btn) btn.disabled = true;
-  const selfBtn = document.getElementById('appSelfUpdate');
-  if (selfBtn) selfBtn.disabled = true;
-  const dismissBtn = document.getElementById('appUpdateDismiss');
-  if (dismissBtn) dismissBtn.disabled = true;
-}
-
-async function refreshAppUpdate(manual) {
-  const hint = document.getElementById('appUpdateHint');
-  const latestEl = document.getElementById('appUpdateLatest');
-  const bodyEl = document.getElementById('appUpdateBody');
-  const linkEl = document.getElementById('appUpdateLink');
-
-  if (isDockerBuild) {
-    applyDockerUpdateUi();
-    if (latestEl) latestEl.textContent = '';
-    if (bodyEl) bodyEl.textContent = 'Docker 构建已禁用程序自更新，请通过重新拉取镜像升级。';
-    if (linkEl) linkEl.style.pointerEvents = 'none';
-    return { latestTag: '', hasUpdate: false, dockerBuild: true };
-  }
-
-  if (hint) hint.textContent = manual ? '检查中…' : '';
-
-  const data = await j('/api/app_update');
-  const latestTag = (data.latest_tag || '').toString();
-  const latestBody = (data.latest_body || '').toString();
-  const latestUrl = (data.latest_url || '').toString();
-  const hasUpdate = !!data.has_update;
-
-  if (latestEl) latestEl.textContent = latestTag || '';
-  if (bodyEl) bodyEl.textContent = latestBody || '';
-  if (linkEl) {
-    linkEl.href = latestUrl || '#';
-    linkEl.style.pointerEvents = latestUrl ? '' : 'none';
-  }
-
-  const dismissed = getDismissedTag();
-  const shouldShow = hasUpdate && latestTag && dismissed !== latestTag;
-
-  if (shouldShow) {
-    showAppUpdateBanner(true);
-    if (hint) hint.textContent = '发现新版本';
-  } else {
-    showAppUpdateBanner(false);
-    if (manual) {
-      if (!hasUpdate) {
-        if (hint) hint.textContent = '已是最新版本';
-      } else if (dismissed === latestTag) {
-        if (hint) hint.textContent = '已忽略该版本提醒';
-      }
-    }
-  }
-  return { latestTag, hasUpdate };
-}
-
 // ── Status ─────────────────────────────────────────────────────────
 
-let libraryPath = '';
-let libraryPollTimer = null;
+// 状态页 UI（版本/保存目录/监听地址/锁定状态）已从 index.html 移除，
+// 原 refreshStatus() 一并删除；以下仅保留书名/格式弹窗仍在使用的模块变量。
 let pendingBookNameJobId = null;
 let pendingBookNameOptions = [];
 let pendingFormatJobId = null;
 let pendingFormatOptions = [];
-
-async function refreshStatus() {
-  const data = await j('/api/status');
-  document.getElementById('version').textContent = data.version || '';
-  const prewarmError = (data.prewarm_error || '').toString();
-  document.getElementById('prewarm').textContent = prewarmError
-    ? 'failed'
-    : (data.prewarm_in_progress ? 'warming' : 'ready');
-  document.getElementById('saveDir').textContent = data.save_dir || '';
-  document.getElementById('bind').textContent = data.bind_addr || '';
-  document.getElementById('locked').textContent = data.locked ? 'locked' : 'unlocked';
-  const iidBanner = document.getElementById('iidWarningBanner');
-  const iidBannerBody = document.getElementById('iidWarningBannerBody');
-  if (iidBanner) iidBanner.classList.toggle('hidden', !prewarmError);
-  if (iidBannerBody && prewarmError) iidBannerBody.textContent = prewarmError;
-  if (prewarmError) maybeShowIidWarning(prewarmError);
-  isDockerBuild = !!data.docker_build;
-  applyDockerUpdateUi();
-}
-
-// ── Config ─────────────────────────────────────────────────────────
-
-async function refreshConfig() {
-  const data = await j('/api/config');
-  const nf = document.getElementById('cfgNovelFormat');
-  const ea = document.getElementById('cfgEnableAudiobook');
-  const af = document.getElementById('cfgAudiobookFormat');
-  if (nf) nf.value = (data.novel_format || 'txt').toString();
-  if (ea) ea.checked = !!data.enable_audiobook;
-  if (af) af.value = (data.audiobook_format || 'mp3').toString();
-}
-
-async function saveConfig() {
-  const nf = document.getElementById('cfgNovelFormat')?.value;
-  const ea = !!document.getElementById('cfgEnableAudiobook')?.checked;
-  const af = document.getElementById('cfgAudiobookFormat')?.value;
-
-  await j('/api/config', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      novel_format: nf,
-      enable_audiobook: ea,
-      audiobook_format: af
-    })
-  });
-}
-
-async function refreshRawConfig() {
-  const data = await j('/api/config/raw');
-  const ta = document.getElementById('cfgRaw');
-  const msg = document.getElementById('cfgRawMsg');
-  if (ta) ta.value = (data.yaml || '').toString();
-  if (msg) msg.textContent = data.generated ? '已生成默认配置（未找到配置文件）' : '';
-}
-
-async function saveRawConfig() {
-  const ta = document.getElementById('cfgRaw');
-  const yaml = (ta?.value || '').toString();
-  await j('/api/config/raw', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ yaml })
-  });
-}
-
-// ── Full Config ────────────────────────────────────────────────────
-
-let currentFullConfig = null;
-
-const FULL_CONFIG_SCHEMA = [
-  {
-    title: '基础与格式',
-    fields: [
-      { key: 'save_path', label: '保存路径', type: 'text' },
-      { key: 'novel_format', label: '小说格式', type: 'select', options: [
-        { value: 'txt', label: 'txt' },
-        { value: 'epub', label: 'epub' },
-        { value: 'pdf', label: 'pdf' },
-        { value: 'bulk_txt', label: '散装文件' },
-        { value: 'ask_after_download', label: '下载后选择' }
-      ] },
-      { key: 'first_line_indent_em', label: '首行缩进(em)', type: 'number', parse: 'float', step: '0.1', min: '0' },
-      { key: 'auto_clear_dump', label: '自动清理缓存', type: 'bool' },
-      { key: 'auto_open_downloaded_files', label: '下载完成后自动打开', type: 'bool' },
-      { key: 'allow_overwrite_files', label: '允许覆盖已存在文件', type: 'bool' },
-      { key: 'preferred_book_name_field', label: '优先书名字段', type: 'select', options: [
-        { value: 'book_name', label: '默认书名' },
-        { value: 'original_book_name', label: '原始书名' },
-        { value: 'book_short_name', label: '短书名' },
-        { value: 'ask_after_download', label: '下载完后选择' }
-      ] },
-      { key: 'old_cli', label: '旧版 CLI UI', type: 'bool' },
-    ]
-  },
-  {
-    title: '网络与调度',
-    fields: [
-      { key: 'max_workers', label: '最大线程数', type: 'number', parse: 'int', min: '1' },
-      { key: 'request_timeout', label: '请求超时(s)', type: 'number', parse: 'int', min: '1' },
-      { key: 'max_retries', label: '最大重试次数', type: 'number', parse: 'int', min: '0' },
-      { key: 'min_connect_timeout', label: '最小连接超时(s)', type: 'number', parse: 'float', step: '0.1', min: '0' },
-      { key: 'min_wait_time', label: '最小等待时间(ms)', type: 'number', parse: 'int', min: '0' },
-      { key: 'max_wait_time', label: '最大等待时间(ms)', type: 'number', parse: 'int', min: '0' },
-    ]
-  },
-  {
-    title: 'API',
-    fields: [
-      { key: 'use_official_api', label: '使用官方 API', type: 'bool' },
-      { key: 'api_endpoints', label: 'API 列表', type: 'list', placeholder: '每行一条或用逗号分隔' },
-      { key: 'unidbg_signer_url', label: 'unidbg 签名 sidecar 地址', type: 'string', placeholder: 'http://127.0.0.1:8099（留空走第三方 API）' },
-    ]
-  },
-  {
-    title: '段评',
-    fields: [
-      { key: 'enable_segment_comments', label: '启用段评', type: 'bool' },
-      { key: 'segment_comments_top_n', label: '每段评论数上限', type: 'number', parse: 'int', min: '1' },
-      { key: 'segment_comments_workers', label: '段评并发线程数', type: 'number', parse: 'int', min: '1' },
-    ]
-  },
-  {
-    title: '媒体下载',
-    fields: [
-      { key: 'download_comment_images', label: '下载评论图片', type: 'bool' },
-      { key: 'download_comment_avatars', label: '下载评论头像', type: 'bool' },
-      { key: 'media_download_workers', label: '媒体下载线程数', type: 'number', parse: 'int', min: '1' },
-      { key: 'blocked_media_domains', label: '阻止的图片域名', type: 'list', placeholder: '每行一个域名' },
-      { key: 'force_convert_images_to_jpeg', label: '强制转成 JPEG', type: 'bool' },
-      { key: 'jpeg_retry_convert', label: '失败重试再转 JPEG', type: 'bool' },
-      { key: 'jpeg_quality', label: 'JPEG 质量(0-100)', type: 'number', parse: 'int', min: '0', max: '100' },
-      { key: 'convert_heic_to_jpeg', label: 'HEIC 转 JPEG', type: 'bool' },
-      { key: 'keep_heic_original', label: '保留 HEIC 原图', type: 'bool' },
-      { key: 'media_limit_per_chapter', label: '单章节媒体上限', type: 'number', parse: 'int', min: '0' },
-      { key: 'media_max_dimension_px', label: '媒体最大尺寸(px)', type: 'number', parse: 'int', min: '0' },
-    ]
-  },
-  {
-    title: '有声书',
-    fields: [
-      { key: 'enable_audiobook', label: '启用有声书', type: 'bool' },
-      { key: 'audiobook_voice', label: '发音人', type: 'voice' },
-      { key: 'audiobook_tts_provider', label: 'TTS 服务类型', type: 'select', options: [
-        { value: 'edge', label: 'edge' }, { value: 'third_party', label: 'third_party' }
-      ] },
-      { key: 'audiobook_tts_api_url', label: '第三方 TTS API 地址', type: 'text' },
-      { key: 'audiobook_tts_api_token', label: '第三方 TTS Token', type: 'text' },
-      { key: 'audiobook_tts_model', label: '第三方 TTS 模型', type: 'text' },
-      { key: 'audiobook_rate', label: '语速调整', type: 'text' },
-      { key: 'audiobook_volume', label: '音量调整', type: 'text' },
-      { key: 'audiobook_pitch', label: '音调调整', type: 'text' },
-      { key: 'audiobook_format', label: '输出格式', type: 'select', options: [
-        { value: 'mp3', label: 'mp3' }, { value: 'wav', label: 'wav' }
-      ] },
-      { key: 'audiobook_concurrency', label: '并发生成章节数', type: 'number', parse: 'int', min: '1' },
-    ]
-  },
-];
-
-const AUDIOBOOK_VOICE_PRESETS = [
-  { value: 'zh-CN-XiaoxiaoNeural', label: 'zh-CN-XiaoxiaoNeural (女)' },
-  { value: 'zh-CN-XiaoyiNeural', label: 'zh-CN-XiaoyiNeural (女)' },
-  { value: 'zh-CN-YunjianNeural', label: 'zh-CN-YunjianNeural (男)' },
-  { value: 'zh-CN-YunxiNeural', label: 'zh-CN-YunxiNeural (男)' },
-  { value: 'zh-CN-YunxiaNeural', label: 'zh-CN-YunxiaNeural (男)' },
-  { value: 'zh-CN-YunyangNeural', label: 'zh-CN-YunyangNeural (男)' },
-  { value: 'zh-CN-liaoning-XiaobeiNeural', label: 'zh-CN-liaoning-XiaobeiNeural (女)' },
-  { value: 'zh-CN-shaanxi-XiaoniNeural', label: 'zh-CN-shaanxi-XiaoniNeural (女)' },
-  { value: 'zh-HK-HiuGaaiNeural', label: 'zh-HK-HiuGaaiNeural (女)' },
-  { value: 'zh-HK-HiuMaanNeural', label: 'zh-HK-HiuMaanNeural (女)' },
-  { value: 'zh-HK-WanLungNeural', label: 'zh-HK-WanLungNeural (男)' },
-  { value: 'zh-TW-HsiaoChenNeural', label: 'zh-TW-HsiaoChenNeural (女)' },
-];
-
-function renderFullConfigForm(cfg) {
-  const body = document.getElementById('configFullBody');
-  if (!body) return;
-  body.innerHTML = '';
-
-  for (const section of FULL_CONFIG_SCHEMA) {
-    const sec = document.createElement('div');
-    sec.className = 'configSection';
-    sec.innerHTML = `<h4>${esc(section.title)}</h4>`;
-    body.appendChild(sec);
-
-    for (const field of section.fields) {
-      const row = document.createElement('div');
-      row.className = 'config-field';
-
-      const label = document.createElement('span');
-      label.className = 'field-label';
-      label.textContent = field.label;
-      row.appendChild(label);
-
-      let input;
-      if (field.type === 'bool') {
-        input = document.createElement('input');
-        input.type = 'checkbox';
-        input.checked = !!cfg[field.key];
-      } else if (field.type === 'voice') {
-        input = document.createElement('div');
-        input.className = 'voiceRow';
-        const select = document.createElement('select');
-        const emptyOpt = document.createElement('option');
-        emptyOpt.value = '';
-        emptyOpt.textContent = '自定义...';
-        select.appendChild(emptyOpt);
-        for (const opt of AUDIOBOOK_VOICE_PRESETS) {
-          const o = document.createElement('option');
-          o.value = opt.value;
-          o.textContent = opt.label;
-          select.appendChild(o);
-        }
-        const text = document.createElement('input');
-        text.type = 'text';
-        text.value = (cfg[field.key] ?? '').toString();
-        text.placeholder = '输入或选择发音人';
-        text.dataset.key = field.key;
-        text.dataset.type = 'text';
-        text.dataset.voiceInput = '1';
-
-        const current = (cfg[field.key] ?? '').toString();
-        const preset = AUDIOBOOK_VOICE_PRESETS.find(p => p.value === current);
-        select.value = preset ? preset.value : '';
-
-        select.addEventListener('change', () => { if (select.value) text.value = select.value; });
-        input.appendChild(select);
-        input.appendChild(text);
-      } else if (field.type === 'select') {
-        input = document.createElement('select');
-        for (const opt of field.options || []) {
-          const o = document.createElement('option');
-          o.value = opt.value;
-          o.textContent = opt.label;
-          input.appendChild(o);
-        }
-        if (field.key === 'novel_format' && cfg.ask_format_after_download) {
-          input.value = 'ask_after_download';
-        } else if (field.key === 'novel_format' && cfg.bulk_files) {
-          input.value = 'bulk_txt';
-        } else {
-          input.value = (cfg[field.key] ?? '').toString();
-        }
-      } else if (field.type === 'list') {
-        input = document.createElement('textarea');
-        input.value = Array.isArray(cfg[field.key]) ? cfg[field.key].join('\n') : '';
-        input.placeholder = field.placeholder || '';
-        input.classList.add('cfgList');
-      } else if (field.type === 'number') {
-        input = document.createElement('input');
-        input.type = 'number';
-        if (field.step) input.step = field.step;
-        if (field.min) input.min = field.min;
-        if (field.max) input.max = field.max;
-        input.value = (cfg[field.key] ?? '').toString();
-      } else {
-        input = document.createElement('input');
-        input.type = 'text';
-        input.value = (cfg[field.key] ?? '').toString();
-        if (field.placeholder) input.placeholder = field.placeholder;
-      }
-
-      if (field.type !== 'voice') {
-        input.dataset.key = field.key;
-        input.dataset.type = field.type;
-        if (field.parse) input.dataset.parse = field.parse;
-      }
-
-      row.appendChild(input);
-      sec.appendChild(row);
-    }
-  }
-}
-
-async function loadFullConfigPanel() {
-  const msg = document.getElementById('cfgFullMsg');
-  if (msg) msg.textContent = '加载中…';
-  try {
-    const cfg = await j('/api/config/full');
-    currentFullConfig = cfg || {};
-    renderFullConfigForm(currentFullConfig);
-    if (msg) msg.textContent = '';
-  } catch (err) {
-    if (msg) msg.textContent = '加载失败';
-  }
-}
-
-function collectFullConfig() {
-  const out = { ...(currentFullConfig || {}) };
-  const body = document.getElementById('configFullBody');
-  if (!body) return out;
-  const inputs = body.querySelectorAll('[data-key]');
-  for (const el of inputs) {
-    const key = el.dataset.key;
-    const type = el.dataset.type;
-    if (!key || !type) continue;
-    if (type === 'bool') {
-      out[key] = !!el.checked;
-    } else if (type === 'list') {
-      out[key] = (el.value || '').toString().split(/[\n,;]/).map(s => s.trim()).filter(s => s.length > 0);
-    } else if (type === 'number') {
-      const raw = (el.value || '').toString().trim();
-      if (!raw) continue;
-      const parse = el.dataset.parse || 'int';
-      const val = parse === 'float' ? parseFloat(raw) : parseInt(raw, 10);
-      if (!Number.isNaN(val)) out[key] = val;
-    } else {
-      out[key] = (el.value || '').toString();
-    }
-  }
-  if (out.novel_format === 'ask_after_download') {
-    out.ask_format_after_download = true;
-    out.bulk_files = false;
-    out.novel_format = (currentFullConfig?.novel_format || 'txt').toString();
-  } else if (out.novel_format === 'bulk_txt') {
-    out.ask_format_after_download = false;
-    out.bulk_files = true;
-    out.novel_format = 'txt';
-  } else if (out.novel_format) {
-    out.ask_format_after_download = false;
-    out.bulk_files = false;
-  }
-  return out;
-}
-
-async function saveFullConfig() {
-  const cfg = collectFullConfig();
-  await j('/api/config/full', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(cfg)
-  });
-}
 
 // ── Library（下载库 = 已落库成品书 + 进行中任务卡片）──────────────────
 
@@ -2086,7 +1525,7 @@ async function openPreview(bookId, hintCoverUrl, force, hintTitle) {
     // 预览过一次→写入缓存；同时自动补档（若之前无有效存档）。
     setPreviewCache(preview.book_id || bookId, preview);
     fetchWithCreds(`/api/preview/${encodeURIComponent(preview.book_id || bookId)}/archive`, { method: 'POST' })
-      .then(() => { refreshHistory().catch(() => {}); loadRecentDownloads().catch(() => {}); })
+      .then(() => { loadRecentDownloads().catch(() => {}); })
       .catch(() => {});
   } catch (err) {
     if (abortController.signal.aborted || requestSerial !== previewRequestSerial || currentPreviewBookId !== bookId) return;
@@ -2420,62 +1859,6 @@ function refreshJobs() { return syncJobs(true); }
 // 定时轮询：只收变化项。
 function pollJobs() { return syncJobs(false); }
 
-// ── History ───────────────────────────────────────────────────────
-
-async function refreshHistory() {
-  const hint = document.getElementById('historyHint');
-  const body = document.getElementById('historyBody');
-  if (!body) return;
-  const kw = (document.getElementById('historyKeyword')?.value || '').toString().trim();
-  const showFailed = !!document.getElementById('historyShowFailed')?.checked;
-
-  if (hint) hint.textContent = '加载中…';
-  body.innerHTML = '<span class="k">加载中…</span>';
-
-  const qs = new URLSearchParams();
-  qs.set('limit', '300');
-  if (kw) qs.set('q', kw);
-
-  const data = await j(`/api/history?${qs.toString()}`);
-  const hidden = loadIdSet(HIDDEN_RECORDS_KEY);
-  let items = (data.items || []).filter(it => it && it.book_id && !hidden.has(String(it.book_id)));
-  // 前端默认隐藏失败记录（后端 view=all 仍可查）。
-  if (!showFailed) items = items.filter(it => (it.status || '').toLowerCase() !== 'failed');
-
-  const hiddenCount = hidden.size;
-  const restoreBtn = document.getElementById('restoreRecords');
-  const hiddenCountEl = document.getElementById('hiddenCount');
-  if (restoreBtn) restoreBtn.classList.toggle('hidden', hiddenCount === 0);
-  if (hiddenCountEl) hiddenCountEl.textContent = String(hiddenCount);
-
-  if (items.length === 0) {
-    body.innerHTML = '<div class="grid-empty">暂无下载记录</div>';
-    if (hint) hint.textContent = `共 ${items.length} 条`;
-    return;
-  }
-
-  body.innerHTML = items.map(it => {
-    const bidStr = String(it.book_id || '');
-    const status = (it.status || '').toLowerCase();
-    const src = sourceBadge(bidStr);
-    const tags = [`<span class="tag ${src.cls}">${src.text}</span>`];
-    if (status === 'failed') tags.push('<span class="tag tag-red">失败</span>');
-    else if (status === 'archive') tags.push('<span class="tag tag-blue">存档</span>');
-    const info = searchCardMeta(it);
-    return miniBookCard({
-      cover: it.cover_url,
-      title: it.book_name || bidStr,
-      author: it.author,
-      meta: tags.join('') + (info ? `<span class="mm-info">${esc(info)}</span>` : ''),
-      dataAttrs: `data-bookid="${esc(bidStr)}"`,
-      actions:
-        `<button data-bookid="${esc(bidStr)}" data-cover="${esc(it.cover_url || '')}" class="startDownload sm primary">预览</button>` +
-        `<button data-bookid="${esc(bidStr)}" class="hideRecordBtn sm ghost" title="从视图移除">✕</button>`,
-    });
-  }).join('');
-  if (hint) hint.textContent = `共 ${items.length} 条`;
-}
-
 // ── Updates ────────────────────────────────────────────────────────
 
 let updatesPollTimer = null;
@@ -2525,11 +1908,6 @@ async function clearJob(id) {
 
 // ── Book Name Modal ────────────────────────────────────────────────
 
-function isBookNameModalOpen() {
-  const modal = document.getElementById('bookNameModal');
-  return modal && !modal.classList.contains('hidden');
-}
-
 function hideBookNameModal() {
   pendingBookNameJobId = null;
   pendingBookNameOptions = [];
@@ -2575,11 +1953,6 @@ async function submitBookNameChoice(value) {
   });
   hideBookNameModal();
   await refreshJobs();
-}
-
-function isFormatModalOpen() {
-  const modal = document.getElementById('formatModal');
-  return modal && !modal.classList.contains('hidden');
 }
 
 function hideFormatModal() {
@@ -2689,42 +2062,6 @@ function wire() {
   if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
   updateThemeButton(getStoredTheme());
 
-  // -- Config Tabs --
-  const configTabs = document.querySelectorAll('.config-tab');
-  const configPanels = {
-    quick: document.getElementById('configPanelQuick'),
-    full: document.getElementById('configPanelFull'),
-    yaml: document.getElementById('configPanelYaml'),
-  };
-  let fullConfigLoaded = false;
-
-  configTabs.forEach(tab => {
-    tab.addEventListener('click', async () => {
-      const target = tab.dataset.tab;
-      configTabs.forEach(t => t.classList.toggle('active', t === tab));
-      Object.entries(configPanels).forEach(([k, panel]) => {
-        if (panel) panel.classList.toggle('active', k === target);
-      });
-
-      // Lazy-load full config on first switch
-      if (target === 'full' && !fullConfigLoaded) {
-        fullConfigLoaded = true;
-        await loadFullConfigPanel();
-      }
-    });
-  });
-
-  // -- Library Back --
-  const backBtn = document.getElementById('libBack');
-  if (backBtn) {
-    backBtn.addEventListener('click', async () => {
-      const parts = (libraryPath || '').split('/').filter(Boolean);
-      parts.pop();
-      libraryPath = parts.join('/');
-      try { await refreshLibrary(); } catch (err) { alert(err); }
-    });
-  }
-
   // -- 下载库工具栏：刷新 / 书名过滤 --
   const libRefreshBtn = document.getElementById('libRefresh');
   if (libRefreshBtn) libRefreshBtn.addEventListener('click', () => { refreshLibrary().catch(() => {}); refreshUpdates(true).catch(() => {}); });
@@ -2819,118 +2156,6 @@ function wire() {
     });
   }
 
-  // -- 下载记录：含失败开关 / 恢复已隐藏 --
-  const hsFailed = document.getElementById('historyShowFailed');
-  if (hsFailed) hsFailed.addEventListener('change', () => { refreshHistory().catch(() => {}); });
-  const restoreBtn = document.getElementById('restoreRecords');
-  if (restoreBtn) restoreBtn.addEventListener('click', () => { clearHidden(HIDDEN_RECORDS_KEY); refreshHistory().catch(() => {}); });
-
-  // -- App Update --
-  const appUpdBtn = document.getElementById('appUpdateCheck');
-  if (appUpdBtn) appUpdBtn.addEventListener('click', async () => {
-    try { await refreshAppUpdate(true); } catch (err) { alert(err); }
-  });
-
-  const dismissBtn = document.getElementById('appUpdateDismiss');
-  if (dismissBtn) dismissBtn.addEventListener('click', async () => {
-    try {
-      const { latestTag } = await refreshAppUpdate(false);
-      if (latestTag) {
-        setDismissedTag(latestTag);
-        showAppUpdateBanner(false);
-        const hint = document.getElementById('appUpdateHint');
-        if (hint) hint.textContent = '已设置不再提醒';
-      }
-    } catch (err) { alert(err); }
-  });
-
-  const selfUpdBtn = document.getElementById('appSelfUpdate');
-  if (selfUpdBtn) selfUpdBtn.addEventListener('click', async () => {
-    const hint = document.getElementById('appUpdateHint');
-    if (hint) hint.textContent = '自更新启动中…';
-    try {
-      await j('/api/self_update', { method: 'POST' });
-      if (hint) hint.textContent = '自更新任务已启动';
-      await pollSelfUpdateStatus();
-    } catch (err) {
-      if (hint) hint.textContent = '自更新触发失败';
-      alert(err);
-    }
-  });
-
-  const historyRefresh = document.getElementById('historyRefresh');
-  if (historyRefresh) historyRefresh.addEventListener('click', async () => {
-    try { await refreshHistory(); } catch (err) { alert(err); }
-  });
-
-  const historyKeyword = document.getElementById('historyKeyword');
-  if (historyKeyword) historyKeyword.addEventListener('keydown', async (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      try { await refreshHistory(); } catch (err) { alert(err); }
-    }
-  });
-
-  // -- Quick Config Save --
-  const cfgForm = document.getElementById('configForm');
-  if (cfgForm) cfgForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const msg = document.getElementById('configMsg');
-    if (msg) msg.textContent = '保存中…';
-    try {
-      await saveConfig();
-      if (msg) msg.textContent = '已保存';
-    } catch (err) {
-      if (msg) msg.textContent = '保存失败';
-      alert(err);
-    }
-  });
-
-  // -- Full Config Save --
-  const cfgFullSave = document.getElementById('cfgFullSave');
-  if (cfgFullSave) cfgFullSave.addEventListener('click', async () => {
-    const msg = document.getElementById('cfgFullMsg');
-    if (msg) msg.textContent = '保存中…';
-    try {
-      await saveFullConfig();
-      await refreshConfig();
-      await refreshRawConfig();
-      if (msg) msg.textContent = '已保存';
-    } catch (err) {
-      if (msg) msg.textContent = '保存失败';
-      alert(err);
-    }
-  });
-
-  // -- YAML Config --
-  const cfgRawReload = document.getElementById('cfgRawReload');
-  if (cfgRawReload) cfgRawReload.addEventListener('click', async () => {
-    const msg = document.getElementById('cfgRawMsg');
-    if (msg) msg.textContent = '加载中…';
-    try {
-      await refreshRawConfig();
-      if (msg) msg.textContent = '已加载';
-    } catch (err) {
-      if (msg) msg.textContent = '加载失败';
-      alert(err);
-    }
-  });
-
-  const cfgRawSave = document.getElementById('cfgRawSave');
-  if (cfgRawSave) cfgRawSave.addEventListener('click', async () => {
-    const msg = document.getElementById('cfgRawMsg');
-    if (msg) msg.textContent = '保存中…';
-    try {
-      await saveRawConfig();
-      await refreshConfig();
-      await refreshRawConfig();
-      if (msg) msg.textContent = '已保存';
-    } catch (err) {
-      if (msg) msg.textContent = '保存失败';
-      alert(err);
-    }
-  });
-
   // -- Delegated Click Handlers --
   document.addEventListener('click', async (e) => {
     const t = e.target;
@@ -2983,27 +2208,6 @@ function wire() {
       const kind = t.getAttribute('data-kind') || '';
       try { await openJobConfiguration(jobId, kind); } catch (err) { alert(err); }
     }
-    if (t.classList.contains('goLibrary')) {
-      const title = t.getAttribute('data-title') || '';
-      const jobId = t.getAttribute('data-jobid');
-      if (jobId) {
-        await clearJob(jobId).catch(() => {});
-        await refreshJobs().catch(() => {});
-      }
-      libraryPath = '';
-      window.location.hash = '#library';
-      await refreshLibrary();
-      highlightLibraryItem(title);
-    }
-    if (t.classList.contains('openDir')) {
-      const p = (t.getAttribute('data-path') || '').toString();
-      libraryPath = p;
-      try { await refreshLibrary(); } catch (err) { alert(err); }
-    }
-    if (t.classList.contains('recent-open')) {
-      const bookId = t.getAttribute('data-bookid');
-      try { await startDownload(bookId); } catch (err) { alert(err); }
-    }
     if (t.classList.contains('libDelete')) {
       let paths = [];
       try { paths = JSON.parse(t.getAttribute('data-paths') || '[]'); } catch { paths = []; }
@@ -3014,10 +2218,6 @@ function wire() {
         await j('/api/library/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths }) });
         await refreshLibrary();
       } catch (err) { alert(err); }
-    }
-    if (t.classList.contains('hideRecordBtn')) {
-      const bookId = t.getAttribute('data-bookid');
-      if (bookId) { addHidden(HIDDEN_RECORDS_KEY, bookId); refreshHistory().catch(() => {}); }
     }
     if (t.classList.contains('hideJobBtn')) {
       const jobId = t.getAttribute('data-jobid');
@@ -3101,20 +2301,6 @@ function wire() {
   if (iidWarningClose) iidWarningClose.addEventListener('click', () => showIidWarningModal(false));
   const iidWarningOk = document.getElementById('iidWarningOk');
   if (iidWarningOk) iidWarningOk.addEventListener('click', () => showIidWarningModal(false));
-}
-
-function highlightLibraryItem(title) {
-  if (!title) return;
-  const cards = document.querySelectorAll('#libraryBooks .book-card');
-  for (const card of cards) {
-    const nameEl = card.querySelector('.book-card-title');
-    if (nameEl && nameEl.textContent.includes(title)) {
-      card.classList.add('lib-highlight');
-      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => card.classList.remove('lib-highlight'), 3000);
-      break;
-    }
-  }
 }
 
 // ── Boot ───────────────────────────────────────────────────────────

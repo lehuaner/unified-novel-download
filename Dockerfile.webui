@@ -8,23 +8,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy source (includes Tomato-Novel-Official-API as subdir in the build context)
-COPY . /workspace/Tomato-Novel-Downloader
+COPY . /workspace/Unified-Novel-Downloader
 
-# Move the private dependency to expected sibling path
-RUN if [ -d "/workspace/Tomato-Novel-Downloader/Tomato-Novel-Official-API" ]; then \
-      mv /workspace/Tomato-Novel-Downloader/Tomato-Novel-Official-API /workspace/Tomato-Novel-Official-API; \
-    fi
-
-WORKDIR /workspace/Tomato-Novel-Downloader
+WORKDIR /workspace/Unified-Novel-Downloader
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    if [ -d "/workspace/Tomato-Novel-Official-API" ]; then \
-      cargo build --release --no-default-features --features official-api,tts,docker,shuqi; \
-    else \
-      cargo build --release --no-default-features --features no-official-api,tts,docker,shuqi; \
-    fi
+    cargo build --release --no-default-features --features shuqi,qimao,tts,docker
 
 FROM debian:bookworm-slim
 
@@ -34,14 +24,16 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=builder /workspace/Tomato-Novel-Downloader/target/release/tomato-novel-downloader /app/tomato-novel-downloader
+COPY --from=builder /workspace/Unified-Novel-Downloader/target/release/unified-novel-downloader /app/unified-novel-downloader
 COPY docker-entrypoint-webui.sh /app/entrypoint.sh
 
-RUN chmod +x /app/entrypoint.sh
+# 先去掉可能的 CRLF：Windows 工作副本直接 docker build 时，entrypoint 会因 \r 报 bad interpreter。
+RUN sed -i 's/\r$//' /app/entrypoint.sh \
+    && chmod +x /app/entrypoint.sh
 
-ENV TOMATO_WEB_ADDR=0.0.0.0:18423
-ENV TOMATO_DATA_DIR=
-ENV TOMATO_WEB_PASSWORD=
+ENV UNIFIED_WEB_ADDR=0.0.0.0:18423
+ENV UNIFIED_DATA_DIR=
+ENV UNIFIED_WEB_PASSWORD=
 
 EXPOSE 18423
 

@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::IpAddr;
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -13,18 +12,15 @@ use uuid::Uuid;
 use crate::base_system::context::Config;
 use crate::download::downloader::{BookNameOption, ProgressSnapshot};
 
+/// Web 层只读配置快照。目前仅番茄搜索会读 `unidbg_signer_url`；
+/// 其余字段随状态页与 `/api/status` 一同下线。
 #[derive(Clone, Debug)]
 pub(crate) struct ConfigView {
-    pub(crate) old_cli: bool,
-    pub(crate) use_official_api: bool,
-    pub(crate) save_path: String,
-    pub(crate) api_endpoints_len: usize,
     pub(crate) unidbg_signer_url: String,
 }
 
 #[derive(Clone)]
 pub(crate) struct AppState {
-    pub(crate) bind_addrs: Arc<Vec<SocketAddr>>,
     pub(crate) config_view: Arc<ConfigView>,
     pub(crate) config: Arc<Mutex<Config>>, // allow runtime updates via Web UI
     pub(crate) config_path: Arc<PathBuf>,
@@ -36,8 +32,6 @@ pub(crate) struct AppState {
     pub(crate) cover_cache: Arc<CoverThumbCache>,
     pub(crate) auth: Option<AuthState>,
     /// 限制同时访问上游 API（search / preview）的并发数，防止 WebUI 被用作多用户 API 代理。
-    /// 仅在启用 official-api feature 时有意义，其他 feature 下置 None。
-    #[cfg(feature = "official-api")]
     pub(crate) api_semaphore: Arc<tokio::sync::Semaphore>,
 }
 

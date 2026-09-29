@@ -14,6 +14,7 @@ use anyhow::{Result, anyhow};
 use tracing::{info, warn};
 
 use crate::base_system::context::Config;
+use crate::base_system::env_first;
 use state::{AppState, AuthState, ConfigView, JobStore, LibraryScanStore};
 
 pub fn run(
@@ -22,21 +23,18 @@ pub fn run(
     config_path: PathBuf,
     cookie_secure: bool,
 ) -> Result<()> {
-    let bind_raw = std::env::var("TOMATO_WEB_ADDR").unwrap_or_else(|_| DEFAULT_BIND.to_string());
+    let bind_raw = env_first(&["UNIFIED_WEB_ADDR", "TOMATO_WEB_ADDR"])
+        .unwrap_or_else(|| DEFAULT_BIND.to_string());
     let bind_addrs: Vec<SocketAddr> = parse_bind_addrs(&bind_raw)?;
 
     let view = ConfigView {
-        old_cli: config.old_cli,
-        use_official_api: config.use_official_api,
-        save_path: config.save_path.clone(),
-        api_endpoints_len: config.api_endpoints.len(),
         unidbg_signer_url: config.unidbg_signer_url.clone(),
     };
 
     let library_root = config.default_save_dir();
 
     let auth = password
-        .or_else(|| std::env::var("TOMATO_WEB_PASSWORD").ok())
+        .or_else(|| env_first(&["UNIFIED_WEB_PASSWORD", "TOMATO_WEB_PASSWORD"]))
         .and_then(|p| {
             let p = p.trim().to_string();
             if p.is_empty() {
@@ -98,7 +96,7 @@ fn parse_bind_addr(raw: &str) -> Result<SocketAddr> {
     }
 
     Err(anyhow!(
-        "invalid TOMATO_WEB_ADDR: '{s}'. Use '127.0.0.1:18423' or '[::1]:18423' (IPv6 needs brackets). For multiple binds, separate by comma: '0.0.0.0:18423,[::]:18423'."
+        "invalid UNIFIED_WEB_ADDR (legacy TOMATO_WEB_ADDR is also accepted): '{s}'. Use '127.0.0.1:18423' or '[::1]:18423' (IPv6 needs brackets). For multiple binds, separate by comma: '0.0.0.0:18423,[::]:18423'."
     ))
 }
 
@@ -110,7 +108,7 @@ fn parse_bind_addrs(raw: &str) -> Result<Vec<SocketAddr>> {
         .collect();
 
     if parts.is_empty() {
-        return Err(anyhow!("empty TOMATO_WEB_ADDR"));
+        return Err(anyhow!("empty UNIFIED_WEB_ADDR"));
     }
 
     if parts.len() == 1 {
@@ -141,7 +139,6 @@ async fn run_async(
     auth: Option<AuthState>,
 ) -> Result<()> {
     let state = AppState {
-        bind_addrs: Arc::new(bind_addrs.clone()),
         config_view: Arc::new(view),
         config: Arc::new(std::sync::Mutex::new(config)),
         config_path: Arc::new(config_path),
@@ -154,7 +151,6 @@ async fn run_async(
         auth,
         // 最多允许 2 个并发的上游 API 请求（search / preview），
         // 单用户正常使用完全够用，SaaS 滥用场景下无法并发服务多用户。
-        #[cfg(feature = "official-api")]
         api_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
     };
 
@@ -192,7 +188,7 @@ async fn run_async(
             }
         };
 
-        info!(target: "web", "Web UI listening on http://{bind}/ (set TOMATO_WEB_ADDR to override)");
+        info!(target: "web", "Web UI listening on http://{bind}/ (set UNIFIED_WEB_ADDR to override)");
         if locked {
             info!(target: "web", "Web UI lock mode enabled (password required)");
             println!("Web UI listening on http://{bind}/ (LOCKED)");
@@ -215,7 +211,7 @@ async fn run_async(
     }
 
     if servers.is_empty() {
-        return Err(anyhow!("no listeners started (check TOMATO_WEB_ADDR)"));
+        return Err(anyhow!("no listeners started (check UNIFIED_WEB_ADDR)"));
     }
 
     println!("Press Ctrl+C to stop.");

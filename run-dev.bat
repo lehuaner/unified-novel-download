@@ -7,10 +7,10 @@ REM Usage:  run-dev.bat              (watch mode, auto-rebuild on src/ changes)
 REM         run-dev.bat --no-watch      (plain cargo run, no auto-rebuild)
 REM         run-dev.bat --no-clean      (keep stale dev instances alive)
 REM
-REM A leftover tomato-novel-downloader.exe (orphaned cargo-watch child, an IDE
+REM A leftover unified-novel-downloader.exe (orphaned cargo-watch child, an IDE
 REM debug session, a manual cargo run) locks target\debug\*.exe and makes the
 REM build fail with:
-REM     error: failed to remove file `...\target\debug\tomato-novel-downloader.exe`
+REM     error: failed to remove file `...\target\debug\unified-novel-downloader.exe`
 REM run-dev.ps1 reaps such stale instances before building and kills the whole
 REM process tree on exit, so the lock never survives. Use --no-clean to opt out.
 

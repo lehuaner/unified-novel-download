@@ -3,16 +3,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
 use serde_json::{Value, json};
-#[cfg(feature = "official-api")]
-use std::time::Instant;
 
-#[cfg(feature = "official-api")]
-use tomato_novel_official_api::{SearchClient, SearchError};
-#[cfg(feature = "official-api")]
-use tracing::{info, warn};
-
-#[cfg(feature = "official-api")]
-use crate::base_system::logging::redact_log_endpoints;
 use crate::ui::web::state::AppState;
 
 #[derive(Debug, Deserialize)]
@@ -34,7 +25,6 @@ pub(crate) async fn api_search(
     State(_state): State<AppState>,
     Query(q): Query<SearchQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    #[cfg(not(feature = "official-api"))]
     {
         let keyword = q.q.trim();
         if keyword.is_empty() {
@@ -63,6 +53,7 @@ pub(crate) async fn api_search(
         let tab = q.tab.unwrap_or(1).max(1);
         let selected_items = q.selected_items.clone();
         let offset = q.offset.unwrap_or(0);
+        // 分页游标：番茄用 offset，书旗/七猫用 page（从 1 起）。
         let page = q.page.unwrap_or(1).max(1) as u32;
         let fanqie_handle = if want_fanqie {
             let signer_url = _state.config_view.unidbg_signer_url.trim();
@@ -305,124 +296,4 @@ pub(crate) async fn api_search(
         }
         Ok(Json(resp))
     }
-
-    #[cfg(feature = "official-api")]
-    {
-        let keyword = q.q.trim().to_string();
-        if keyword.is_empty() {
-            return Ok(Json(json!({"items": []})));
-        }
-
-        let started = Instant::now();
-
-        // 并发限制：最多 2 个同时进行的上游 API 请求。
-        let _permit =
-            _state.api_semaphore.acquire().await.map_err(|_| {
-                api_error(StatusCode::SERVICE_UNAVAILABLE, "上游 API 并发限制已关闭")
-            })?;
-
-        let keyword_for_log = keyword.clone();
-        let resp = tokio::task::spawn_blocking(move || {
-            let client = SearchClient::new()?;
-            client.search_books(&keyword)
-        })
-        .await
-        .map_err(|err| {
-            warn!(
-                target: "search",
-                surface = "web",
-                stage = "worker_join",
-                query = %keyword_for_log,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                error_debug = ?err,
-                "搜索后台任务失败"
-            );
-            api_error(StatusCode::INTERNAL_SERVER_ERROR, "搜索任务执行失败")
-        })?
-        .map_err(|err| {
-            let error_kind = match &err {
-                SearchError::Iid(_) => "iid",
-                SearchError::Http(_) => "network",
-            };
-            warn!(
-                target: "search",
-                surface = "web",
-                stage = "upstream_request",
-                error_kind,
-                query = %keyword_for_log,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = %err,
-                error_debug = ?err,
-                "搜索请求失败"
-            );
-            let safe_error = redact_log_endpoints(&err.to_string());
-            api_error(StatusCode::BAD_GATEWAY, format!("搜索失败: {safe_error}"))
-        })?;
-
-        info!(
-            target: "search",
-            surface = "web",
-            query = %keyword_for_log,
-            result_count = resp.books.len(),
-            elapsed_ms = started.elapsed().as_millis() as u64,
-            "搜索请求完成"
-        );
-
-        let mut items: Vec<Value> = resp
-            .books
-            .into_iter()
-            .map(|b| {
-                json!({
-                    "book_id": b.book_id,
-                    "title": b.title,
-                    "author": b.author,
-                    "raw": b.raw,
-                })
-            })
-            .collect();
-
-        // 与 no-official-api 分支一致：规范化 封面 / 简介 / 评分。
-        use crate::base_system::json_extract::{
-            collect_maps, pick_cover, pick_description, pick_score,
-        };
-        for item in &mut items {
-            let Some(raw) = item.get("raw") else { continue };
-            let Some(obj) = raw.as_object() else { continue };
-            let mut cover_url = pick_cover(obj);
-            let mut description = None;
-            let mut score = None;
-            for m in collect_maps(raw) {
-                if cover_url.is_none() {
-                    cover_url = pick_cover(m);
-                }
-                if description.is_none() {
-                    description = pick_description(m);
-                }
-                if score.is_none() {
-                    score = pick_score(m);
-                }
-            }
-            match cover_url.filter(|x| x.starts_with("http://") || x.starts_with("https://")) {
-                Some(u) => {
-                    item["cover_url"] =
-                        json!(crate::base_system::json_extract::to_public_jpeg_cover(&u));
-                }
-                None => item["cover_url"] = Value::Null,
-            }
-            if let Some(d) = description {
-                item["description"] = json!(d);
-            }
-            if let Some(s) = score {
-                item["score"] = json!(s);
-            }
-        }
-
-        Ok(Json(json!({"items": items})))
-    }
-}
-
-#[cfg(feature = "official-api")]
-fn api_error(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Value>) {
-    (status, Json(json!({ "error": message.into() })))
 }

@@ -1,10 +1,12 @@
 <#
 .SYNOPSIS
-Runs the local maintenance checks for Tomato Novel Downloader.
+Runs the local maintenance checks for Unified Novel Downloader.
 
 .DESCRIPTION
-This script intentionally avoids `cargo --all-features` because the project has
-mutually exclusive features: `official-api` and `no-official-api`.
+The project has a single build recipe (third-party parsing, all novel sources enabled).
+`cargo --all-features` is still invalid: `tts` and `tts-native` pick mutually exclusive
+TTS backends, and `docker` switches off self-update. So this script checks the default
+set plus the lightweight cross-target set used by musl/android releases.
 
 Run from the repository root:
   pwsh ./scripts/maintain.ps1
@@ -13,7 +15,7 @@ Run from the repository root:
 
 param(
     [switch]$SkipFmt,
-    [switch]$SkipNoOfficial,
+    [switch]$SkipCross,
     [switch]$SkipTree
 )
 
@@ -53,13 +55,13 @@ Invoke-Step "Default feature clippy" {
     cargo clippy --all-targets -- -D warnings
 }
 
-if (-not $SkipNoOfficial) {
-    Invoke-Step "no-official-api tests" {
-        cargo test --no-default-features --features no-official-api
+if (-not $SkipCross) {
+    Invoke-Step "Cross-target feature tests (musl/android set)" {
+        cargo test --no-default-features --features shuqi,qimao,tts-native,clipboard
     }
 
-    Invoke-Step "no-official-api clippy" {
-        cargo clippy --no-default-features --features no-official-api --all-targets -- -D warnings
+    Invoke-Step "Cross-target clippy (musl/android set)" {
+        cargo clippy --no-default-features --features shuqi,qimao,tts-native,clipboard --all-targets -- -D warnings
     }
 }
 

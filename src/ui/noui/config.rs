@@ -42,12 +42,8 @@ enum ConfigField {
     MinWaitTime,
     MaxWaitTime,
     MinConnectTimeout,
-    UseOfficialApi,
     ApiEndpoints,
     UnidbgSignerUrl,
-    EnableSegmentComments,
-    SegmentCommentsTopN,
-    SegmentCommentsWorkers,
     DownloadCommentImages,
     DownloadCommentAvatars,
     MediaDownloadWorkers,
@@ -164,11 +160,6 @@ pub(super) fn show_config_menu(config: &mut Config) -> Result<()> {
             ty: ConfigValueType::Float,
         },
         ConfigOption {
-            name: "是否使用官方API",
-            field: ConfigField::UseOfficialApi,
-            ty: ConfigValueType::Bool,
-        },
-        ConfigOption {
             name: "自定义API列表(逗号分隔)",
             field: ConfigField::ApiEndpoints,
             ty: ConfigValueType::List,
@@ -177,21 +168,6 @@ pub(super) fn show_config_menu(config: &mut Config) -> Result<()> {
             name: "unidbg签名sidecar地址",
             field: ConfigField::UnidbgSignerUrl,
             ty: ConfigValueType::String,
-        },
-        ConfigOption {
-            name: "是否下载段评",
-            field: ConfigField::EnableSegmentComments,
-            ty: ConfigValueType::Bool,
-        },
-        ConfigOption {
-            name: "段评每段最多条数",
-            field: ConfigField::SegmentCommentsTopN,
-            ty: ConfigValueType::Int,
-        },
-        ConfigOption {
-            name: "段评并发线程数",
-            field: ConfigField::SegmentCommentsWorkers,
-            ty: ConfigValueType::Int,
         },
         ConfigOption {
             name: "是否下载评论区图片",
@@ -263,16 +239,10 @@ pub(super) fn show_config_menu(config: &mut Config) -> Result<()> {
     loop {
         println!("\n=== 配置选项 ===");
         for (idx, opt) in OPTS.iter().enumerate() {
-            let mut name = opt.name.to_string();
-            if matches!(opt.field, ConfigField::EnableSegmentComments)
-                && config.novel_format.eq_ignore_ascii_case("txt")
-            {
-                name.push_str("（TXT 不支持）");
-            }
             println!(
                 "{}. {}: {}",
                 idx + 1,
-                name,
+                opt.name,
                 config_value_display(config, opt.field)
             );
         }
@@ -355,12 +325,8 @@ fn config_value_display(config: &Config, field: ConfigField) -> String {
         ConfigField::MinWaitTime => config.min_wait_time.to_string(),
         ConfigField::MaxWaitTime => config.max_wait_time.to_string(),
         ConfigField::MinConnectTimeout => config.min_connect_timeout.to_string(),
-        ConfigField::UseOfficialApi => config.use_official_api.to_string(),
         ConfigField::ApiEndpoints => config.api_endpoints.join(","),
         ConfigField::UnidbgSignerUrl => config.unidbg_signer_url.clone(),
-        ConfigField::EnableSegmentComments => config.enable_segment_comments.to_string(),
-        ConfigField::SegmentCommentsTopN => config.segment_comments_top_n.to_string(),
-        ConfigField::SegmentCommentsWorkers => config.segment_comments_workers.to_string(),
         ConfigField::DownloadCommentImages => config.download_comment_images.to_string(),
         ConfigField::DownloadCommentAvatars => config.download_comment_avatars.to_string(),
         ConfigField::MediaDownloadWorkers => config.media_download_workers.to_string(),
@@ -422,14 +388,6 @@ fn set_bool(config: &mut Config, field: ConfigField, v: bool) -> Result<()> {
         ConfigField::AutoClearDump => config.auto_clear_dump = v,
         ConfigField::AllowOverwriteFiles => config.allow_overwrite_files = v,
         ConfigField::EnableAudiobook => config.enable_audiobook = v,
-        ConfigField::UseOfficialApi => config.use_official_api = v,
-        ConfigField::EnableSegmentComments => {
-            if v && config.novel_format.eq_ignore_ascii_case("txt") {
-                config.novel_format = "epub".to_string();
-                println!("已自动将保存格式切换为 EPUB 以启用段评功能。");
-            }
-            config.enable_segment_comments = v;
-        }
         ConfigField::DownloadCommentImages => config.download_comment_images = v,
         ConfigField::DownloadCommentAvatars => config.download_comment_avatars = v,
         ConfigField::ForceConvertImagesToJpeg => config.force_convert_images_to_jpeg = v,
@@ -487,18 +445,6 @@ fn set_int(config: &mut Config, field: ConfigField, v: i64) -> Result<()> {
                 return Err(anyhow!("有声小说并发数必须大于 0"));
             }
             config.audiobook_concurrency = v as usize;
-        }
-        ConfigField::SegmentCommentsTopN => {
-            if v <= 0 {
-                return Err(anyhow!("段评条数上限必须大于 0"));
-            }
-            config.segment_comments_top_n = v as usize;
-        }
-        ConfigField::SegmentCommentsWorkers => {
-            if v <= 0 {
-                return Err(anyhow!("段评线程数必须大于 0"));
-            }
-            config.segment_comments_workers = v as usize;
         }
         ConfigField::MediaDownloadWorkers => {
             if v <= 0 {

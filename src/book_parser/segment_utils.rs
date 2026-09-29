@@ -1,6 +1,6 @@
 //! 段评/评论相关的解析与拼装工具。
 
-#![cfg_attr(not(feature = "official-api"), allow(dead_code))]
+#![allow(dead_code)]
 
 use regex::Regex;
 use std::sync::OnceLock;
@@ -11,7 +11,7 @@ use super::html_utils::{escape_html, unescape_basic_entities};
 fn class_attr_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     // Note: This pattern handles typical HTML class attributes but doesn't handle edge cases
-    // like escaped quotes within the class value. In practice, Tomato Novel API HTML doesn't
+    // like escaped quotes within the class value. In practice, Fanqie novel API HTML doesn't
     // use such complex patterns.
     REGEX.get_or_init(|| Regex::new(r#"(?i)\bclass\s*=\s*["']([^"']*)["']"#).unwrap())
 }

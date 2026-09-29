@@ -217,50 +217,6 @@ fn docker_update_report(current_version: &str) -> UpdateCheckReport {
     }
 }
 
-pub async fn fetch_latest_release_async() -> Result<LatestRelease> {
-    if cfg!(feature = "docker") {
-        return Ok(LatestRelease {
-            tag_name: normalize_tag(env!("CARGO_PKG_VERSION")),
-            name: Some("Docker build".to_string()),
-            body: Some("Docker 构建已禁用程序自更新，请通过重新拉取镜像进行升级。".to_string()),
-            html_url: None,
-            published_at: None,
-        });
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
-        .build()
-        .context("init http client")?;
-
-    let resp = client
-        .get(github_latest_release_url())
-        .header(ACCEPT, "application/vnd.github+json")
-        .header(USER_AGENT, "UnifiedNovelDownloader/1.0")
-        .send()
-        .await
-        .context("request latest release")?
-        .error_for_status()
-        .context("latest release status")?;
-
-    let info = resp
-        .json::<ReleaseInfo>()
-        .await
-        .context("parse latest release json")?;
-    let tag_name = info.tag_name.unwrap_or_default();
-    if tag_name.trim().is_empty() {
-        return Err(anyhow!("latest release missing tag_name"));
-    }
-
-    Ok(LatestRelease {
-        tag_name: normalize_tag(&tag_name),
-        name: info.name,
-        body: info.body,
-        html_url: info.html_url,
-        published_at: info.published_at,
-    })
-}
-
 pub fn should_notify_startup(report: &UpdateCheckReport) -> bool {
     report.is_new_version && !report.is_dismissed
 }

@@ -12,10 +12,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[cfg(feature = "official-api")]
-use tomato_novel_official_api::DirectoryClient;
-
-#[cfg(not(feature = "official-api"))]
 use crate::network_parser::network::{FanqieWebConfig, FanqieWebNetwork};
 
 #[derive(Debug, Clone)]
@@ -343,27 +339,6 @@ where
     results
 }
 
-#[cfg(feature = "official-api")]
-fn fetch_remote_totals_worker(
-    queue: Arc<Mutex<VecDeque<String>>>,
-    tx: mpsc::Sender<(String, usize)>,
-) {
-    let Ok(client) = DirectoryClient::new() else {
-        return;
-    };
-    while let Some(book_id) = queue.lock().ok().and_then(|mut q| q.pop_front()) {
-        let total = client
-            .fetch_directory(&book_id)
-            .ok()
-            .map(|d| d.chapters.len())
-            .filter(|n| *n > 0);
-        if let Some(total) = total {
-            let _ = tx.send((book_id, total));
-        }
-    }
-}
-
-#[cfg(not(feature = "official-api"))]
 fn fetch_remote_totals_worker(
     queue: Arc<Mutex<VecDeque<String>>>,
     tx: mpsc::Sender<(String, usize)>,

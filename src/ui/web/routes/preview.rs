@@ -22,7 +22,7 @@ use crate::ui::web::state::AppState;
 
 fn preview_cover_cache_dir() -> PathBuf {
     std::env::temp_dir()
-        .join("tomato-novel-downloader")
+        .join("unified-novel-downloader")
         .join("webui_preview_cover")
 }
 
@@ -117,7 +117,10 @@ fn resolve_local_preview_cover_key_with_web_fallback(
     }
 
     // 第二轮：通过 web 页面抓取封面 URL（不同来源，URL 可能不同）
-    debug!(book_id, "官方 API 封面获取失败，尝试 web 页面抓取封面 URL");
+    debug!(
+        book_id,
+        "目录元数据未带可用封面，尝试从 web 页面抓取封面 URL"
+    );
     let web = match FanqieWebNetwork::new(FanqieWebConfig::default()) {
         Ok(w) => w,
         Err(e) => {
@@ -180,7 +183,6 @@ pub(crate) async fn api_preview(
     }
 
     // 并发限制：与 search 共用同一个信号量，最多 2 个上游 API 请求并发。
-    #[cfg(feature = "official-api")]
     let _permit = state
         .api_semaphore
         .acquire()
@@ -399,7 +401,7 @@ pub(crate) async fn api_preview_cover_by_book(
                 StatusCode::NOT_FOUND
             })?
     } else {
-        warn!(book_id = %book_id, "无法获取封面（官方 API 和 web 页面均未找到可用封面 URL）");
+        warn!(book_id = %book_id, "无法获取封面（目录元数据与 web 页面均未找到可用封面 URL）");
         return Err(StatusCode::NOT_FOUND);
     };
 

@@ -1,3 +1,43 @@
+# 构建产物与备用 target 目录
+target/
+target_qm/
+target_smoke/
+publish/
+release_dl/
+
+# 版本控制与 CI 定义
+.git/
+.github/
+
+# 运行时数据（含用户已下载书籍与日志）
+logs/
+downloads/
+novels/
+shuqi_data/
+
+# 本地逆向/抓包/实验素材，体积大且与构建无关
+examples/
+localtest/
+
+# 个人部署脚本与本地配置
+deploy/
+config.yml
+.tnd_update_cache.json
+
+# 会话签名密钥：绝不能进入构建上下文/镜像层
+web_session_secret.key
+
+# 临时文件
+*.log
+*.tmp
+*.zip
+
+# 图标：源码用 include_bytes! 内嵌以下 4 个文件，必须保留，其余排除
+img/*
+!img/app.ico
+!img/fqnovel.webp
+!img/sqnovel.png
+!img/qmnovel.webp
 target/
 Tomato-Novel-Official-API/target/
 .git/

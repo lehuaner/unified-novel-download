@@ -37,7 +37,8 @@ pub(crate) mod finalize_utils;
 pub(crate) mod html_utils;
 pub(crate) mod image_utils;
 pub mod parser;
-#[cfg(feature = "official-api")]
+// 段评依赖官方 API 通道，当前构建不编译，保留待第三方段评接口接入
+#[cfg(any())]
 pub(crate) mod segment_comments;
 pub(crate) mod segment_shared;
 pub mod segment_utils;

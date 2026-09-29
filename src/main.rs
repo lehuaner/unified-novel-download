@@ -1,4 +1,4 @@
-//! Tomato Novel Downloader（番茄小说下载器）Rust 实现。
+//! Unified Novel Downloader（多源小说下载器）Rust 实现。
 //!
 //! 本 crate 负责：配置加载、交互界面（TUI/CLI）、下载调度、内容解析与导出（txt/epub/有声书等）。
 //!
@@ -11,9 +11,6 @@
 
 use anyhow::{Result, anyhow};
 use clap::Parser;
-use std::thread;
-#[cfg(feature = "official-api")]
-use std::time::Instant;
 
 mod base_system;
 mod book_parser;
@@ -29,26 +26,14 @@ mod ui;
 
 use base_system::config::{ConfigSpec, load_or_create, load_or_create_with_base};
 use base_system::context::Config;
-#[cfg(feature = "official-api")]
-use base_system::logging::redact_log_endpoints;
 use base_system::logging::{LogOptions, LogSystem};
 use tracing::info;
-#[cfg(feature = "official-api")]
-use tracing::warn;
-
-#[cfg(all(feature = "official-api", feature = "no-official-api"))]
-compile_error!(
-    "features 'official-api' and 'no-official-api' are mutually exclusive; use exactly one"
-);
-
-#[cfg(feature = "official-api")]
-use tomato_novel_official_api::prewarm_iid;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Parser)]
-#[command(name = "tomato-novel-downloader")]
-#[command(about = "Tomato Novel Downloader (Rust TUI)")]
+#[command(name = "unified-novel-downloader")]
+#[command(about = "Unified Novel Downloader (Rust TUI)")]
 struct Cli {
     /// 启用调试日志输出
     #[arg(long, default_value_t = false)]
@@ -99,7 +84,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.version {
-        println!("Tomato Novel Downloader v{}", VERSION);
+        println!("Unified Novel Downloader v{}", VERSION);
         return Ok(());
     }
 
@@ -118,46 +103,6 @@ fn main() -> Result<()> {
     // 启动时强制热更新（仅当 SHA256 不同且 tag 相同）。
     // 例外：cargo run/开发态运行时跳过。
     let _ = base_system::self_update::check_hotfix_and_apply(VERSION);
-
-    prewarm_state::mark_prewarm_start();
-    thread::spawn(|| {
-        #[cfg(feature = "official-api")]
-        {
-            let started = Instant::now();
-            // 注意：这里只应“预热/确保可用”，不得在每次启动时强制更换 IID。
-            // `prewarm_iid()` 现在会优先复用本地文件缓存，仅在缓存缺失或过期时才注册新的 IID。
-            match prewarm_iid() {
-                Ok(_) => info!(
-                    target: "startup",
-                    stage = "iid_prewarm",
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    "IID 预热完成"
-                ),
-                Err(err) => {
-                    let safe_error = redact_log_endpoints(&err.to_string());
-                    warn!(
-                        target: "startup",
-                        stage = "iid_prewarm",
-                        elapsed_ms = started.elapsed().as_millis() as u64,
-                        error = %err,
-                        error_debug = ?err,
-                        "IID 预热失败"
-                    );
-                    prewarm_state::mark_prewarm_failed(safe_error);
-                    if let Some(message) = prewarm_state::prewarm_error() {
-                        warn!(target: "startup", "{message}");
-                    }
-                    return;
-                }
-            }
-        }
-
-        #[cfg(not(feature = "official-api"))]
-        {
-            info!(target: "startup", "no-official-api 构建：跳过 IID 预热");
-        }
-        prewarm_state::mark_prewarm_done();
-    });
 
     let mut config = load_config_from_data_dir(data_dir)?;
 
@@ -184,10 +129,14 @@ fn main() -> Result<()> {
     if cli.server {
         let password = cli
             .password
-            .or_else(|| std::env::var("TOMATO_WEB_PASSWORD").ok());
+            .or_else(|| base_system::env_first(&["UNIFIED_WEB_PASSWORD", "TOMATO_WEB_PASSWORD"]));
         let cookie_secure = cli.cookie_secure
-            || parse_bool_env("TOMATO_WEB_COOKIE_SECURE")
-            || parse_bool_env("TOMATO_COOKIE_SECURE");
+            || base_system::env_bool_first(&[
+                "UNIFIED_WEB_COOKIE_SECURE",
+                "UNIFIED_COOKIE_SECURE",
+                "TOMATO_WEB_COOKIE_SECURE",
+                "TOMATO_COOKIE_SECURE",
+            ]);
         return ui::web::run(
             &mut config,
             password,
@@ -231,18 +180,6 @@ fn config_path_from_data_dir(data_dir: Option<&std::path::Path>) -> std::path::P
     } else {
         std::path::PathBuf::from(<Config as ConfigSpec>::FILE_NAME)
     }
-}
-
-fn parse_bool_env(key: &str) -> bool {
-    std::env::var(key)
-        .ok()
-        .map(|v| {
-            matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
 }
 
 fn init_logging(debug: bool, base_dir: Option<&std::path::Path>) -> Result<LogSystem> {

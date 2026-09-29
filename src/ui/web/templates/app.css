@@ -192,27 +192,40 @@ body {
 }
 .sidebar-footer .theme-toggle { width: auto; }
 
-.free-notice {
-  margin-top: 10px;
-  padding: 8px 10px;
+/* 底部横条：完全免费声明。body 为纵向 flex 且 .main-content 已 flex:1，
+   所以该 footer 始终贴在页面最底部（桌面与移动端位置一致）。 */
+.notice-bar {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding: 10px 16px;
   font-size: 0.75rem;
   line-height: 1.5;
-  color: var(--text-secondary);
-  border-radius: 6px;
-  background: var(--surface);
   text-align: center;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
 }
 
-/* Desktop: hide the mobile-only free-notice injected in status section */
-@media (min-width: 769px) {
-  .free-notice-mobile { display: none; }
-}
-.free-notice a {
+.notice-bar a {
   color: var(--accent);
   text-decoration: none;
 }
-.free-notice a:hover {
+.notice-bar a:hover {
   text-decoration: underline;
+}
+
+/* 底部“开源仓库”链接：内联 GitHub 图标 + 醒目标色，避免与周围灰色文案混成一片。 */
+.notice-bar a.repo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.notice-bar a.repo-link .repo-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
 }
 
 .theme-toggle {
@@ -551,19 +564,6 @@ button.success {
   color: #fff;
 }
 
-/* ===== Library Highlight（下载库跳转后一次性 outline 高亮，不与 hover 阴影/背景过渡冲突，避免闪烁） ===== */
-.book-card.lib-highlight {
-  outline-style: solid;
-  outline-width: 3px;
-  outline-offset: 2px;
-  outline-color: transparent;
-  animation: lib-highlight-fade 1.6s ease-out;
-}
-@keyframes lib-highlight-fade {
-  0%, 40% { outline-color: var(--success); }
-  100% { outline-color: transparent; }
-}
-
 /* ===== Modals ===== */
 .modal {
   position: fixed;
@@ -604,7 +604,6 @@ button.success {
   transform: translateY(0) scale(1);
 }
 
-.configCard { max-width: 800px; }
 .previewCard { max-width: 680px; }
 
 .modalHeader {
@@ -674,98 +673,6 @@ button.success {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
-}
-
-/* ===== Config Section (in modal) ===== */
-.configSection {
-  margin-bottom: 20px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--border-light);
-}
-.configSection:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-.configSection h4 { color: var(--primary); font-size: 0.95rem; margin-bottom: 14px; }
-
-.configRaw textarea {
-  width: 100%;
-  max-width: 100%;
-  height: 380px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  margin-bottom: 14px;
-  resize: vertical;
-}
-
-.voiceRow {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.voiceRow select,
-.voiceRow input { max-width: 260px; }
-
-.cfgList {
-  min-height: 80px;
-  max-width: 100%;
-  resize: vertical;
-}
-
-/* ===== Config Tabs (inline in page) ===== */
-.config-tabs {
-  display: flex;
-  gap: 0;
-  border-bottom: 2px solid var(--border);
-  margin-bottom: 20px;
-}
-
-.config-tab {
-  padding: 10px 20px;
-  border: none;
-  background: none;
-  color: var(--text-muted);
-  font-weight: 600;
-  font-size: 0.9rem;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  transition: color 0.15s, border-color 0.15s;
-  border-radius: 0;
-  font-family: inherit;
-}
-
-.config-tab:hover {
-  color: var(--text-main);
-  background: none;
-}
-
-.config-tab.active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
-  background: none;
-}
-
-.config-panel {
-  display: none;
-}
-.config-panel.active {
-  display: block;
-}
-
-.config-field {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-light);
-}
-.config-field:last-child { border-bottom: none; }
-
-.config-field .field-label {
-  min-width: 110px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  flex-shrink: 0;
 }
 
 .card-accent-left {
@@ -948,7 +855,6 @@ button.success {
   .nav a { white-space: nowrap; padding: 8px 12px; font-size: 0.85rem; }
 
   .sidebar-footer { border-top: none; padding: 8px; }
-  .sidebar-footer .free-notice { display: none; }
   .theme-toggle span { display: none; }
 
   .main-content {
@@ -958,9 +864,6 @@ button.success {
 
   .previewHeader { flex-direction: column; }
   .previewCover { width: 90px; height: 120px; }
-
-  .config-field { flex-direction: column; align-items: flex-start; }
-  .config-field .field-label { min-width: unset; }
 }
 
 /* ===== Source Tags ===== */
@@ -993,12 +896,6 @@ button.success {
 }
 .chip:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
 #searchHistory .chip { font-size: 0.78rem; padding: 4px 10px; border-radius: 14px; }
-.recent-list { display: flex; flex-direction: column; gap: 2px; }
-.recent-item { display: flex; align-items: baseline; gap: 10px; padding: 6px 8px; border-radius: 8px; }
-.recent-item:hover { background: var(--primary-light); }
-.recent-open { background: none; border: none; color: var(--primary); font-size: 0.92rem; font-weight: 600; cursor: pointer; text-align: left; padding: 0; }
-.recent-open:hover { text-decoration: underline; }
-.recent-sub { color: var(--text-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .link-btn { background: none; border: none; color: var(--text-muted); font-size: 0.8rem; cursor: pointer; padding: 2px 4px; }
 .link-btn:hover { color: var(--danger); text-decoration: underline; }
 .link-primary { color: var(--primary); text-decoration: none; font-size: 0.85rem; }
@@ -1099,49 +996,9 @@ button.success {
 mark { background: rgba(255, 200, 0, 0.40); color: inherit; padding: 0 2px; border-radius: 3px; }
 [data-theme="dark"] mark { background: rgba(255, 200, 0, 0.28); }
 
-/* ===== 文件卡片（下载库·文件库） ===== */
-.file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 4px; }
-.file-card { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); min-width: 0; transition: box-shadow .15s, border-color .15s; }
-.file-card:hover { box-shadow: var(--shadow); border-color: var(--primary); }
-.file-card-icon { font-size: 1.6rem; line-height: 1; flex: 0 0 auto; }
-.file-card-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 auto; }
-.file-card-name { font-weight: 600; font-size: .9rem; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .78rem; color: var(--text-muted); }
-.file-card-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
-.file-dl-btn { display: inline-block; text-align: center; padding: 5px 12px; border-radius: 8px; font-size: .82rem; font-weight: 600; text-decoration: none; border: 1px solid var(--border); background: var(--btn-default-bg); color: var(--text-main); cursor: pointer; white-space: nowrap; transition: background .15s, color .15s; }
-.file-dl-btn:hover { background: var(--btn-default-hover); }
-.file-dl-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-.file-dl-btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
-
-/* ===== 下载记录时钟（下拉） ===== */
-.clock-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
-.clock-details > summary { list-style: none; }
-.clock-details > summary::-webkit-details-marker { display: none; }
-.clock-summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; flex-wrap: wrap; }
-.clock-summary:hover { background: var(--surface-hover); }
-.clock-icon { color: var(--primary); flex: 0 0 auto; }
-.clock-title { font-weight: 700; font-size: .98rem; color: var(--text-main); }
-.clock-badge { background: var(--primary); color: #fff; border-radius: 10px; padding: 1px 8px; font-size: .74rem; font-weight: 700; min-width: 20px; text-align: center; }
-.clock-spacer { flex: 1 1 auto; }
+/* ===== 下载库过滤输入框（原“下载记录时钟”面板与文件卡视图的样式已随该 UI 一并移除） ===== */
 .clock-filter { width: 160px; padding: 5px 10px; font-size: .82rem; border: 1px solid var(--border); border-radius: 8px; background: var(--input-bg); color: var(--text-main); }
-.clock-caret { color: var(--text-muted); transition: transform .18s ease; flex: 0 0 auto; }
-.clock-details[open] > .clock-summary .clock-caret { transform: rotate(180deg); }
-.clock-panel { padding: 4px 14px 14px; border-top: 1px solid var(--border-light); }
-.clock-sub { margin-top: 12px; }
-.clock-sub-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: .82rem; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: none; }
-.clock-sub-tools { display: inline-flex; align-items: center; gap: 12px; font-weight: 400; }
-.clock-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: .78rem; color: var(--text-muted); cursor: pointer; }
 
-/* ===== mini 卡片（缩略图+书名+作者） ===== */
-.mini-card { display: flex; gap: 10px; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-sm); min-width: 0; transition: box-shadow .15s, border-color .15s; }
-.mini-card:hover { box-shadow: var(--shadow); border-color: var(--primary); }
-.mini-cover { width: 44px; height: 60px; object-fit: cover; border-radius: 6px; background: var(--input-bg); flex: 0 0 auto; }
-.mini-cover.cover-failed { display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 700; color: var(--text-muted); }
-.mini-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
-.mini-title { font-weight: 700; font-size: .9rem; color: var(--text-main); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mini-author { font-size: .8rem; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mini-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .74rem; color: var(--text-muted); margin-top: 2px; }
-.mini-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .sm.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
 .sm.ghost:hover { background: var(--primary-light); color: var(--primary); border-color: var(--primary); }
 
@@ -1208,7 +1065,6 @@ mark { background: rgba(255, 200, 0, 0.40); color: inherit; padding: 0 2px; bord
 .search-toolbar .sfilter:hover { border-color: var(--primary); color: var(--primary); }
 .search-toolbar .sfilter.active { background: var(--primary-light); border-color: var(--primary); color: var(--primary); font-weight: 600; }
 .search-toolbar .s-more { margin-left: 3.5em; }
-.mm-info { color: var(--text-muted); font-size: .72rem; flex-basis: 100%; margin-top: 2px; }
 
 /* ===== 移动端：品牌紧凑（保留名称） ===== */
 @media (max-width: 768px) {

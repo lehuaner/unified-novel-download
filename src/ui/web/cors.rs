@@ -6,8 +6,9 @@ use axum::response::Response;
 /// (e.g. `unified.html` opened via `file://` or served by a different host)
 /// can call this server's API endpoints.
 ///
-/// Auth is handled via the `X-Tomato-Password` request header (already supported
-/// by the auth middleware), so we don't need `Access-Control-Allow-Credentials`.
+/// Auth is handled via the `X-Unified-Password` request header (legacy `X-Tomato-Password`
+/// is still accepted; both are supported by the auth middleware),
+/// so we don't need `Access-Control-Allow-Credentials`.
 pub(crate) async fn cors_mw(req: Request<axum::body::Body>, next: Next) -> Response {
     // Handle preflight OPTIONS request
     if req.method() == Method::OPTIONS {
@@ -33,7 +34,7 @@ fn set_cors_headers(headers: &mut axum::http::HeaderMap) {
     );
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_HEADERS,
-        HeaderValue::from_static("Content-Type, X-Tomato-Password"),
+        HeaderValue::from_static("Content-Type, X-Unified-Password, X-Tomato-Password"),
     );
     headers.insert(
         header::ACCESS_CONTROL_MAX_AGE,

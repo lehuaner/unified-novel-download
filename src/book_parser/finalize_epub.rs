@@ -5,16 +5,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-#[cfg(feature = "official-api")]
-use crossbeam_channel as channel;
 use regex::Regex;
 use serde_json::Value;
 use std::fs;
 use std::sync::OnceLock;
-#[cfg(feature = "official-api")]
-use std::time::Instant;
-#[cfg(feature = "official-api")]
-use tracing::debug;
 use tracing::{info, warn};
 
 // 编译一次复用的内联图片正则缓存
@@ -30,27 +24,17 @@ use super::html_utils::{
     render_description_xhtml_fragment,
 };
 use super::image_utils::{ensure_cached_image, sha1_hex};
-#[cfg(feature = "official-api")]
-use super::segment_shared::{extract_item_version_map, extract_para_counts_from_stats};
 use super::segment_utils;
-
-#[cfg(feature = "official-api")]
-use super::segment_comments::{
-    load_segment_comments_cache, prefetch_comment_media, render_segment_comment_page,
-};
-
-#[cfg(feature = "official-api")]
-use tomato_novel_official_api::{CommentDownloadOptions, DirectoryClient, ReviewClient};
 
 // ── EPUB 入口 ───────────────────────────────────────────────────
 
-#[cfg_attr(not(feature = "official-api"), allow(unused_variables, unused_mut))]
 pub(super) fn finalize_epub(
     manager: &BookManager,
     chapters: &[Value],
     path: &Path,
     directory_raw: Option<&Value>,
-    mut reporter: Option<&mut crate::download::downloader::ProgressReporter>,
+    // 段评进度上报随官方 API 通道关闭，当前 EPUB 流程不再使用
+    _reporter: Option<&mut crate::download::downloader::ProgressReporter>,
 ) -> anyhow::Result<()> {
     let description_meta = description_to_plain_text(&manager.description);
 
@@ -78,7 +62,6 @@ pub(super) fn finalize_epub(
         target: "segment",
         enable_segment_comments = manager.config.enable_segment_comments,
         novel_format = %manager.config.novel_format,
-        use_official_api = manager.config.use_official_api,
         top_n = manager.config.segment_comments_top_n,
         workers = manager.config.segment_comments_workers,
         download_comment_images = manager.config.download_comment_images,
@@ -177,7 +160,6 @@ pub(super) fn finalize_epub(
             "skipping single volume with default name"
         );
     }
-    let volume_count = volume_order.len();
     let mut volume_file_by_title: HashMap<String, String> = HashMap::new();
     if !skip_volume_pages {
         for (i, t) in volume_order.iter().enumerate() {
@@ -185,17 +167,6 @@ pub(super) fn finalize_epub(
         }
     }
 
-    #[cfg(feature = "official-api")]
-    let enable_segment_comments = manager.config.enable_segment_comments
-        && manager.config.novel_format.eq_ignore_ascii_case("epub");
-
-    #[cfg(feature = "official-api")]
-    let mut item_versions = directory_raw
-        .map(extract_item_version_map)
-        .unwrap_or_default();
-    #[cfg(feature = "official-api")]
-    let item_versions_len = item_versions.len();
-    #[cfg(not(feature = "official-api"))]
     let item_versions_len = 0usize;
 
     info!(
@@ -203,36 +174,6 @@ pub(super) fn finalize_epub(
         item_versions = item_versions_len,
         "item_version map prepared"
     );
-
-    #[cfg(feature = "official-api")]
-    let mut official_dir_fetched = false;
-
-    #[cfg(feature = "official-api")]
-    let review_options = CommentDownloadOptions {
-        enable_comments: enable_segment_comments,
-        download_avatars: false,
-        download_images: false,
-        media_workers: 1,
-        status_dir: None,
-        media_timeout_secs: 8,
-        media_retries: 2,
-    };
-
-    #[cfg(feature = "official-api")]
-    let review_client = if enable_segment_comments {
-        match ReviewClient::new(review_options.clone()) {
-            Ok(c) => {
-                info!(target: "segment", "ReviewClient initialized");
-                Some(c)
-            }
-            Err(e) => {
-                warn!(target: "segment", error = %e.to_string(), "ReviewClient init failed; segment comments disabled for this run");
-                None
-            }
-        }
-    } else {
-        None
-    };
 
     // ── 章节构建数据 ────────────────────────────────────────────
 
@@ -242,12 +183,12 @@ pub(super) fn finalize_epub(
         title: String,
         raw_xhtml: String,
         seg_counts: serde_json::Map<String, Value>,
-        #[cfg(feature = "official-api")]
+        // 段评依赖官方 API 通道，当前构建不编译，保留待第三方段评接口接入
+        #[cfg(any())]
         per_para: Vec<(i32, tomato_novel_official_api::ReviewResponse)>,
     }
 
     let chapter_count = chapters.len();
-    let base_comment_aux_index = 1 + volume_count + chapter_count;
     let mut builds: Vec<ChapterBuild> = Vec::with_capacity(chapter_count);
 
     for (ch_idx, ch) in chapters.iter().enumerate() {
@@ -274,455 +215,17 @@ pub(super) fn finalize_epub(
         )
         .unwrap_or_else(|_| content_html.to_string());
 
-        let mut seg_counts = serde_json::Map::new();
-        #[cfg(feature = "official-api")]
+        let seg_counts = serde_json::Map::new();
+        // 段评依赖官方 API 通道，当前构建不编译，保留待第三方段评接口接入
+        #[cfg(any())]
         let mut per_para: Vec<(i32, tomato_novel_official_api::ReviewResponse)> = Vec::new();
-
-        #[cfg(feature = "official-api")]
-        if enable_segment_comments && let Some(client) = review_client.as_ref() {
-            let mut did_network_fetch = false;
-
-            if let Some(cache) = load_segment_comments_cache(manager, chapter_id) {
-                debug!(
-                    target: "segment",
-                    chapter_id = %chapter_id,
-                    cached_paras = cache.paras.len(),
-                    item_version = %cache.item_version,
-                    "segment cache loaded"
-                );
-
-                for (k, v) in &cache.paras {
-                    if v.count > 0 {
-                        seg_counts
-                            .insert(k.clone(), Value::Number(serde_json::Number::from(v.count)));
-                    }
-                }
-
-                for (k, v) in &cache.paras {
-                    let Ok(idx) = k.parse::<i32>() else {
-                        continue;
-                    };
-                    if let Some(resp) = v.detail.as_ref()
-                        && !resp.reviews.is_empty()
-                    {
-                        per_para.push((idx, resp.clone()));
-                    }
-                }
-                per_para.sort_by_key(|(idx, _)| *idx);
-
-                let mut missing: Vec<i32> = cache
-                    .paras
-                    .iter()
-                    .filter_map(|(k, v)| {
-                        if v.count == 0 {
-                            return None;
-                        }
-                        let Ok(idx) = k.parse::<i32>() else {
-                            return None;
-                        };
-                        let has_detail = v
-                            .detail
-                            .as_ref()
-                            .map(|d| !d.reviews.is_empty())
-                            .unwrap_or(false);
-                        if has_detail { None } else { Some(idx) }
-                    })
-                    .collect();
-                missing.sort_unstable();
-
-                if !missing.is_empty() {
-                    did_network_fetch = true;
-                    let item_version = cache.item_version.as_str();
-                    let top_n = cache.top_n.max(1);
-                    let workers = manager.config.segment_comments_workers.clamp(1, 64);
-                    let worker_count = workers.min(missing.len().max(1));
-
-                    info!(
-                        target: "segment",
-                        chapter_id = %chapter_id,
-                        missing = missing.len(),
-                        worker_count,
-                        "segment cache incomplete; fetching missing paras"
-                    );
-
-                    if worker_count <= 1 {
-                        for para_idx in &missing {
-                            let fetched = client
-                                .fetch_para_comments(
-                                    chapter_id,
-                                    &manager.book_id,
-                                    *para_idx,
-                                    item_version,
-                                    top_n,
-                                    2,
-                                )
-                                .or_else(|_| {
-                                    client.fetch_para_comments(
-                                        chapter_id,
-                                        &manager.book_id,
-                                        *para_idx,
-                                        item_version,
-                                        top_n,
-                                        0,
-                                    )
-                                });
-                            if let Ok(Some(res)) = fetched
-                                && !res.response.reviews.is_empty()
-                            {
-                                per_para.push((*para_idx, res.response));
-                            }
-                        }
-                        per_para.sort_by_key(|(idx, _)| *idx);
-                    } else {
-                        let (tx_jobs, rx_jobs) = channel::unbounded::<i32>();
-                        let (tx_res, rx_res) = channel::unbounded::<(
-                            i32,
-                            Option<tomato_novel_official_api::ReviewResponse>,
-                        )>();
-                        for para_idx in &missing {
-                            let _ = tx_jobs.send(*para_idx);
-                        }
-                        drop(tx_jobs);
-
-                        let mut handles = Vec::with_capacity(worker_count);
-                        for _ in 0..worker_count {
-                            let rx = rx_jobs.clone();
-                            let tx = tx_res.clone();
-                            let chapter_id = chapter_id.to_string();
-                            let book_id = manager.book_id.clone();
-                            let item_version = item_version.to_string();
-                            let options = review_options.clone();
-                            handles.push(std::thread::spawn(move || {
-                                let client = match ReviewClient::new(options) {
-                                    Ok(c) => c,
-                                    Err(_) => return,
-                                };
-                                for para_idx in rx.iter() {
-                                    let fetched = client
-                                        .fetch_para_comments(
-                                            &chapter_id,
-                                            &book_id,
-                                            para_idx,
-                                            &item_version,
-                                            top_n,
-                                            2,
-                                        )
-                                        .or_else(|_| {
-                                            client.fetch_para_comments(
-                                                &chapter_id,
-                                                &book_id,
-                                                para_idx,
-                                                &item_version,
-                                                top_n,
-                                                0,
-                                            )
-                                        });
-                                    if let Ok(Some(res)) = fetched {
-                                        if !res.response.reviews.is_empty() {
-                                            let _ = tx.send((para_idx, Some(res.response)));
-                                        } else {
-                                            let _ = tx.send((para_idx, None));
-                                        }
-                                    } else {
-                                        let _ = tx.send((para_idx, None));
-                                    }
-                                }
-                            }));
-                        }
-                        drop(tx_res);
-
-                        let mut tmp: Vec<(i32, tomato_novel_official_api::ReviewResponse)> =
-                            Vec::new();
-                        for (para_idx, resp) in rx_res.iter() {
-                            if let Some(resp) = resp {
-                                tmp.push((para_idx, resp));
-                            }
-                        }
-                        for h in handles {
-                            let _ = h.join();
-                        }
-                        tmp.sort_by_key(|(idx, _)| *idx);
-
-                        per_para.extend(tmp);
-                        per_para.sort_by_key(|(idx, _)| *idx);
-                        per_para.dedup_by_key(|(idx, _)| *idx);
-                    }
-                }
-            } else {
-                // No cache: use the old online logic.
-                did_network_fetch = true;
-
-                if !item_versions.contains_key(chapter_id) && !official_dir_fetched {
-                    info!(
-                        target: "segment",
-                        book_id = %manager.book_id,
-                        "item_version missing; fetching official directory once"
-                    );
-                    if let Ok(c) = DirectoryClient::new() {
-                        match c.fetch_directory(&manager.book_id) {
-                            Ok(dir) => {
-                                let before = item_versions.len();
-                                item_versions.extend(extract_item_version_map(&dir.raw));
-                                info!(
-                                    target: "segment",
-                                    before,
-                                    after = item_versions.len(),
-                                    chapters = dir.chapters.len(),
-                                    "official directory fetched"
-                                );
-                            }
-                            Err(e) => {
-                                warn!(target: "segment", error = %e.to_string(), "official directory fetch failed");
-                            }
-                        }
-                    } else {
-                        warn!(target: "segment", "DirectoryClient init failed; cannot fetch official directory");
-                    }
-                    official_dir_fetched = true;
-                }
-
-                let item_version = item_versions
-                    .get(chapter_id)
-                    .map(|s| s.as_str())
-                    .unwrap_or("0");
-
-                debug!(
-                    target: "segment",
-                    chapter_id = %chapter_id,
-                    item_version = %item_version,
-                    has_version = item_versions.contains_key(chapter_id),
-                    "using item_version"
-                );
-
-                let t_stats = Instant::now();
-                match client.fetch_comment_stats(chapter_id, item_version) {
-                    Ok(Some(stats)) => {
-                        seg_counts = extract_para_counts_from_stats(&stats);
-                        info!(
-                            target: "segment",
-                            chapter_id = %chapter_id,
-                            ms = t_stats.elapsed().as_millis() as u64,
-                            para_with_counts = seg_counts.len(),
-                            keys = %stats.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(",")).unwrap_or_default(),
-                            "comment stats fetched"
-                        );
-                    }
-                    Ok(None) => {
-                        warn!(
-                            target: "segment",
-                            chapter_id = %chapter_id,
-                            ms = t_stats.elapsed().as_millis() as u64,
-                            "comment stats empty (None)"
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            target: "segment",
-                            chapter_id = %chapter_id,
-                            item_version = %item_version,
-                            ms = t_stats.elapsed().as_millis() as u64,
-                            error = %e.to_string(),
-                            "comment stats fetch failed"
-                        );
-                    }
-                }
-
-                let mut para_with_comments: Vec<i32> = seg_counts
-                    .iter()
-                    .filter_map(|(k, v)| {
-                        let cnt = v.as_u64().unwrap_or(0);
-                        if cnt == 0 {
-                            return None;
-                        }
-                        k.parse::<i32>().ok()
-                    })
-                    .collect();
-                para_with_comments.sort_unstable();
-
-                if !para_with_comments.is_empty() {
-                    let sample = para_with_comments
-                        .iter()
-                        .take(6)
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    info!(
-                        target: "segment",
-                        chapter_id = %chapter_id,
-                        paras = para_with_comments.len(),
-                        sample = %sample,
-                        "paras with comments"
-                    );
-                } else {
-                    info!(
-                        target: "segment",
-                        chapter_id = %chapter_id,
-                        "no paras with comments after parsing stats"
-                    );
-                }
-
-                let top_n = manager.config.segment_comments_top_n.max(1);
-                if !para_with_comments.is_empty() {
-                    let workers = manager.config.segment_comments_workers.clamp(1, 64);
-                    let worker_count = workers.min(para_with_comments.len().max(1));
-
-                    if worker_count <= 1 {
-                        for para_idx in &para_with_comments {
-                            let t_para = Instant::now();
-                            let fetched = client
-                                .fetch_para_comments(
-                                    chapter_id,
-                                    &manager.book_id,
-                                    *para_idx,
-                                    item_version,
-                                    top_n,
-                                    2,
-                                )
-                                .or_else(|_| {
-                                    client.fetch_para_comments(
-                                        chapter_id,
-                                        &manager.book_id,
-                                        *para_idx,
-                                        item_version,
-                                        top_n,
-                                        0,
-                                    )
-                                });
-
-                            match fetched {
-                                Ok(Some(res)) => {
-                                    let reviews = res.response.reviews.len();
-                                    debug!(
-                                        target: "segment",
-                                        chapter_id = %chapter_id,
-                                        para_idx = *para_idx,
-                                        ms = t_para.elapsed().as_millis() as u64,
-                                        reviews,
-                                        "para comments fetched"
-                                    );
-                                    if reviews > 0 {
-                                        per_para.push((*para_idx, res.response));
-                                    }
-                                }
-                                Ok(None) => {
-                                    debug!(
-                                        target: "segment",
-                                        chapter_id = %chapter_id,
-                                        para_idx = *para_idx,
-                                        ms = t_para.elapsed().as_millis() as u64,
-                                        "para comments empty (None)"
-                                    );
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        target: "segment",
-                                        chapter_id = %chapter_id,
-                                        para_idx = *para_idx,
-                                        item_version = %item_version,
-                                        ms = t_para.elapsed().as_millis() as u64,
-                                        error = %e.to_string(),
-                                        "para comments fetch failed"
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        let (tx_jobs, rx_jobs) = channel::unbounded::<i32>();
-                        let (tx_res, rx_res) = channel::unbounded::<(
-                            i32,
-                            Option<tomato_novel_official_api::ReviewResponse>,
-                        )>();
-                        for para_idx in &para_with_comments {
-                            let _ = tx_jobs.send(*para_idx);
-                        }
-                        drop(tx_jobs);
-
-                        let mut handles = Vec::with_capacity(worker_count);
-                        for _ in 0..worker_count {
-                            let rx = rx_jobs.clone();
-                            let tx = tx_res.clone();
-                            let chapter_id = chapter_id.to_string();
-                            let book_id = manager.book_id.clone();
-                            let item_version = item_version.to_string();
-                            let options = review_options.clone();
-                            handles.push(std::thread::spawn(move || {
-                                let client = match ReviewClient::new(options) {
-                                    Ok(c) => c,
-                                    Err(_) => return,
-                                };
-                                for para_idx in rx.iter() {
-                                    let fetched = client
-                                        .fetch_para_comments(
-                                            &chapter_id,
-                                            &book_id,
-                                            para_idx,
-                                            &item_version,
-                                            top_n,
-                                            2,
-                                        )
-                                        .or_else(|_| {
-                                            client.fetch_para_comments(
-                                                &chapter_id,
-                                                &book_id,
-                                                para_idx,
-                                                &item_version,
-                                                top_n,
-                                                0,
-                                            )
-                                        });
-                                    if let Ok(Some(res)) = fetched {
-                                        if !res.response.reviews.is_empty() {
-                                            let _ = tx.send((para_idx, Some(res.response)));
-                                        } else {
-                                            let _ = tx.send((para_idx, None));
-                                        }
-                                    } else {
-                                        let _ = tx.send((para_idx, None));
-                                    }
-                                }
-                            }));
-                        }
-                        drop(tx_res);
-
-                        let mut tmp: Vec<(i32, tomato_novel_official_api::ReviewResponse)> =
-                            Vec::new();
-                        for (para_idx, resp) in rx_res.iter() {
-                            if let Some(resp) = resp {
-                                tmp.push((para_idx, resp));
-                            }
-                        }
-                        for h in handles {
-                            let _ = h.join();
-                        }
-                        tmp.sort_by_key(|(idx, _)| *idx);
-                        per_para = tmp;
-                    }
-                }
-            }
-
-            info!(
-                target: "segment",
-                chapter_id = %chapter_id,
-                para_groups = per_para.len(),
-                "segment comments collected for chapter"
-            );
-
-            if did_network_fetch
-                && let Some(r) = {
-                    #[allow(clippy::needless_option_as_deref)]
-                    reporter.as_deref_mut()
-                }
-            {
-                r.inc_comment_fetch();
-            }
-        }
 
         builds.push(ChapterBuild {
             chapter_id: chapter_id.to_string(),
             title: title.to_string(),
             raw_xhtml: rewritten,
             seg_counts,
-            #[cfg(feature = "official-api")]
+            #[cfg(any())]
             per_para,
         });
 
@@ -731,14 +234,8 @@ pub(super) fn finalize_epub(
 
     // ── 段评页生成 + 正文组装 ───────────────────────────────────
 
-    #[cfg(feature = "official-api")]
-    let mut comment_page_for_chapter: HashMap<String, String> = HashMap::new();
-    #[cfg(not(feature = "official-api"))]
+    // 段评页映射：当前构建不启用段评，恒为空表（章节正文走 clean_epub_body 分支）
     let comment_page_for_chapter: HashMap<String, String> = HashMap::new();
-    #[cfg(feature = "official-api")]
-    let mut comment_pages: Vec<(String, String)> = Vec::new();
-    #[cfg(feature = "official-api")]
-    let mut comment_page_index = 0usize;
 
     // #263: 在正文中增加可见目录页（table-of-contents.html），
     // 并放入 spine 前部，便于在不依赖阅读器侧边栏时快速跳转章节。
@@ -763,39 +260,6 @@ pub(super) fn finalize_epub(
         &toc_html,
         true,
     );
-
-    #[cfg(feature = "official-api")]
-    for (idx, b) in builds.iter().enumerate() {
-        let chapter_file = format!("chapter_{:05}.xhtml", 1 + idx);
-
-        if !b.per_para.is_empty() {
-            prefetch_comment_media(&manager.config, &b.per_para, &images_dir);
-
-            let comment_file = format!(
-                "aux_{:05}.xhtml",
-                base_comment_aux_index + comment_page_index
-            );
-            comment_page_for_chapter.insert(b.chapter_id.clone(), comment_file.clone());
-
-            let page_title = format!("{} - 段评", b.title);
-            let page_html = render_segment_comment_page(
-                &b.title,
-                &chapter_file,
-                &b.raw_xhtml,
-                &b.per_para,
-                &manager.config,
-                &mut resources_added,
-                &images_dir,
-                &mut epub_gen,
-            )?;
-            comment_pages.push((page_title, page_html));
-            comment_page_index += 1;
-
-            if let Some(r) = reporter.as_deref_mut() {
-                r.inc_comment_saved();
-            }
-        }
-    }
 
     // 按序插入分卷标题页和正文章节
     let mut inserted_volumes: HashSet<String> = HashSet::new();
@@ -834,13 +298,6 @@ pub(super) fn finalize_epub(
             &b.title,
             &chapter_out,
         );
-    }
-
-    // 追加段评页
-    #[cfg(feature = "official-api")]
-    for (i, (title, html)) in comment_pages.into_iter().enumerate() {
-        let file = format!("aux_{:05}.xhtml", base_comment_aux_index + i);
-        let _ = epub_gen.add_aux_page_named(file, &title, &html, true);
     }
 
     epub_gen.generate(path, &manager.config)?;

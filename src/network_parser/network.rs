@@ -82,7 +82,7 @@ impl Default for FanqieWebConfig {
             max_retries: 3,
             insecure_tls: false,
             user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36".to_string(),
-            cache_dir: std::env::temp_dir().join("tomato-novel-downloader").join("dir_cache"),
+            cache_dir: std::env::temp_dir().join("unified-novel-downloader").join("dir_cache"),
         }
     }
 }

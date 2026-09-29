@@ -3485,52 +3485,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tomato-novel-downloader"
-version = "2.6.0"
-dependencies = [
- "aes",
- "anyhow",
- "arboard",
- "axum",
- "base64",
- "clap",
- "crossbeam-channel",
- "crossterm",
- "ctrlc",
- "epub-builder",
- "flate2",
- "futures-core",
- "genpdf",
- "hex",
- "hmac",
- "image 0.25.10",
- "indicatif",
- "md-5",
- "msedge-tts",
- "ratatui",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha1 0.10.6",
- "sha2",
- "tempfile",
- "textwrap",
- "thiserror 1.0.69",
- "time 0.3.47",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "tungstenite 0.24.0",
- "uuid",
- "winres",
- "zip",
-]
-
-[[package]]
 name = "toml"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3769,6 +3723,52 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unified-novel-downloader"
+version = "2.6.0"
+dependencies = [
+ "aes",
+ "anyhow",
+ "arboard",
+ "axum",
+ "base64",
+ "clap",
+ "crossbeam-channel",
+ "crossterm",
+ "ctrlc",
+ "epub-builder",
+ "flate2",
+ "futures-core",
+ "genpdf",
+ "hex",
+ "hmac",
+ "image 0.25.10",
+ "indicatif",
+ "md-5",
+ "msedge-tts",
+ "ratatui",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha1 0.10.6",
+ "sha2",
+ "tempfile",
+ "textwrap",
+ "thiserror 1.0.69",
+ "time 0.3.47",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "tungstenite 0.24.0",
+ "uuid",
+ "winres",
+ "zip",
+]
 
 [[package]]
 name = "unsafe-libyaml"
