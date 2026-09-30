@@ -289,7 +289,8 @@ function bookCard(o) {
   const coverHtml = cs
     ? `<img class="book-card-cover" src="${esc(cs)}" alt="" loading="lazy" data-initial="${initial}" onerror="bookCoverError(this)">`
     : `<div class="book-card-cover cover-failed">${initial}</div>`;
-  const coverBox = `<div class="book-card-cover-box">${coverHtml}<span class="cover-badge-down"></span>${o.coverBadge || ''}</div>`;
+  const coverFormat = o.coverFormat ? `<span class="cover-format-badge">${esc(o.coverFormat)}</span>` : '';
+  const coverBox = `<div class="book-card-cover-box"><span class="cover-media">${coverHtml}${coverFormat}</span><span class="cover-badge-down"></span>${o.coverBadge || ''}</div>`;
   const hasScore = o.score != null && o.score !== '' && !isNaN(Number(o.score));
   const scoreHtml = hasScore ? `<span class="book-card-score" title="评分">★ ${Number(o.score).toFixed(1)}</span>` : '';
   const badges = (o.badges || []).filter(b => b && (b.icon || b.text))
@@ -1075,8 +1076,7 @@ function bookLibraryCard(b) {
   const enc = encodePathSegments(mainRel);
   const dlHref = (b.dl_zip ? '/download-zip/' : '/download/') + enc;
   const badges = [];
-  if (b.format) badges.push({ text: String(b.format).toUpperCase(), cls: 'tag-blue' });
-  else if (b.main_is_dir) badges.push({ text: '文件夹', cls: 'tag-blue' });
+  const coverFormat = b.format ? String(b.format).toUpperCase() : (b.main_is_dir ? '文件夹' : '');
   if (b.has_audio) badges.push({ text: '有声', cls: 'tag-orange' });
   badges.push(sourceBadge(bid));
   const up = updateMap[bid];
@@ -1089,7 +1089,7 @@ function bookLibraryCard(b) {
   return bookCard({
     cover: b.cover_url, title: b.title || b.stem, author: b.author,
     desc: b.description, score: b.score, meta: searchCardMeta(b),
-    badges, foot, bookId: bid,
+    badges, foot, bookId: bid, coverFormat,
   });
 }
 
@@ -1132,8 +1132,9 @@ function renderLibraryGrid() {
 
 // 窄屏（两列）下卡片底栏变窄，“可更新”徽标会与下载/删除按钮重叠：
 // 渲染后实测两者包围盒，仅在真发生重叠时把徽标挪到封面下方，不重叠则留在底栏原位。
+// 选择器不绑定容器：下载库(#libraryBooks)与首页“最近下载”(#recentDownloads)用同一张 bookLibraryCard，故同受此逻辑处理。
 function layoutUpdateBadges() {
-  document.querySelectorAll('#libraryBooks .update-badge').forEach(badge => {
+  document.querySelectorAll('.update-badge').forEach(badge => {
     const card = badge.closest('.book-card');
     if (!card) return;
     const downSlot = card.querySelector('.cover-badge-down');
@@ -1393,6 +1394,7 @@ function renderRecentList() {
   const { active, books, downloadedBids } = libraryView();
   const cards = jobCardsHtml(active, downloadedBids) + books.slice(0, 6).map(bookLibraryCard).join('');
   box.innerHTML = cards || '<span class="k">暂无已下载书籍</span>';
+  layoutUpdateBadges();
 }
 
 // 重置到搜索前首页状态（清空结果/工具栏/统计，恢复首页面板）。
@@ -2071,6 +2073,8 @@ function wire() {
       if (panels) panels.classList.remove('hidden');
       refreshSearchHistory().catch(() => {});
       loadRecentDownloads().catch(() => {});
+      // 首页“最近下载”与下载库同一套徽标挪位逻辑，切回时重测。
+      requestAnimationFrame(layoutUpdateBadges);
     }
     if (hash === '#library') {
       refreshLibrary().catch(() => {});
@@ -2095,12 +2099,15 @@ function wire() {
 
   // 网格尺寸变化（转屏 / 列数切换 / 窗口缩放）时重测“可更新”徽标碰撞。
   const libGridEl = document.getElementById('libraryBooks');
-  if (libGridEl && typeof ResizeObserver !== 'undefined') {
+  const recentEl = document.getElementById('recentDownloads');
+  if ((libGridEl || recentEl) && typeof ResizeObserver !== 'undefined') {
     let badgeReflowRaf = 0;
-    new ResizeObserver(() => {
+    const badgeRo = new ResizeObserver(() => {
       if (badgeReflowRaf) cancelAnimationFrame(badgeReflowRaf);
       badgeReflowRaf = requestAnimationFrame(() => { badgeReflowRaf = 0; layoutUpdateBadges(); });
-    }).observe(libGridEl);
+    });
+    if (libGridEl) badgeRo.observe(libGridEl);
+    if (recentEl) badgeRo.observe(recentEl);
   }
 
   // 列数切换（全局，作用于所有 .book-grid）
@@ -2308,7 +2315,20 @@ function wire() {
 
   const previewRefresh = document.getElementById('previewRefresh');
   if (previewRefresh) previewRefresh.addEventListener('click', async () => {
-    if (currentPreviewBookId) { try { await openPreview(currentPreviewBookId, null, true, currentPreviewHintTitle); } catch (err) { alert(err); } }
+    if (!currentPreviewBookId) return;
+    try { await openPreview(currentPreviewBookId, null, true, currentPreviewHintTitle); } catch (err) { alert(err); }
+    // ③ 联动下载库徽标：刷新该书远端章节数并回写 updateMap，无需全量重扫。
+    try {
+      const r = await j('/api/updates/refresh-one?book_id=' + encodeURIComponent(currentPreviewBookId), { method: 'POST' });
+      const bid = String(currentPreviewBookId);
+      if (r && r.ok && r.row) {
+        updateMap[bid] = { new_count: Number(r.row.new_count) || 0, local_total: Number(r.row.local_total) || 0, remote_total: Number(r.row.remote_total) || 0 };
+      } else {
+        delete updateMap[bid];
+      }
+      renderLibraryGrid();
+      renderRecentList();
+    } catch (_) { /* 单本刷新失败不影响预览本身 */ }
   });
 
   // -- Book Name Modal --
@@ -2356,7 +2376,8 @@ async function boot() {
     refreshLibrary(),
     refreshSearchHistory(),
   ]);
-  refreshUpdates().catch(() => {});
+  // 启动不主动重扫（避免每次刷新页面重复获取）；冷启动由后端首次请求破例串行扫描一次。
+  refreshUpdates(false).catch(() => {});
   // 定时轮询只拉变化项（since=游标），不重复传输相同数据。
   setInterval(() => pollJobs().catch(() => {}), 1500);
 }

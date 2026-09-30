@@ -309,6 +309,8 @@ pub(crate) struct UpdateScanInfo {
 #[derive(Debug)]
 pub(crate) struct UpdateScanStore {
     running: AtomicBool,
+    /// 冷启动破例扫描标志：本进程首次请求置位，之后不再自动扫描。
+    boot_scanned: AtomicBool,
     inner: Mutex<UpdateScanInfo>,
 }
 
@@ -316,6 +318,7 @@ impl Default for UpdateScanStore {
     fn default() -> Self {
         Self {
             running: AtomicBool::new(false),
+            boot_scanned: AtomicBool::new(false),
             inner: Mutex::new(UpdateScanInfo {
                 running: false,
                 scanned: 0,
@@ -343,31 +346,63 @@ impl UpdateScanStore {
 
         let now = now_ms();
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        *g = UpdateScanInfo {
-            running: true,
-            scanned: 0,
-            total: 0,
-            save_dir,
-            updates: Vec::new(),
-            no_updates: Vec::new(),
-            error: None,
-            started_ms: now,
-            updated_ms: now,
-        };
+        // ②：不清空 updates/no_updates，扫描期间继续显示上一次结果，finish 时原子替换，避免首屏/刷新闪烁。
+        g.running = true;
+        g.scanned = 0;
+        g.total = 0;
+        g.save_dir = save_dir;
+        g.error = None;
+        g.started_ms = now;
+        g.updated_ms = now;
         true
     }
 
-    pub(crate) fn push_progress(&self, row: UpdateScanRow, scanned: usize, total: usize) {
+    /// 冷启动破例：本进程首次调用返回 true 并置位，之后恒返回 false（不再自动扫描）。
+    pub(crate) fn take_boot_scan(&self) -> bool {
+        self.boot_scanned
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// 冷启动：把磁盘快照载入内存供首屏秒显（不触发网络）。
+    pub(crate) fn load_snapshot(
+        &self,
+        updates: Vec<UpdateScanRow>,
+        no_updates: Vec<UpdateScanRow>,
+        updated_ms: u64,
+    ) {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        g.running = true;
-        g.scanned = scanned;
-        g.total = total;
-        g.updated_ms = now_ms();
+        g.running = false;
+        g.scanned = updates.len() + no_updates.len();
+        g.total = g.scanned;
+        g.updates = updates;
+        g.no_updates = no_updates;
+        g.error = None;
+        g.started_ms = updated_ms;
+        g.updated_ms = updated_ms;
+    }
+
+    /// ③：单本刷新后更新内存快照里该书条目（has_update 变化时在 updates/no_updates 间迁移）。
+    pub(crate) fn update_one(&self, row: UpdateScanRow) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let bid = row.book_id.clone();
+        g.updates.retain(|r| r.book_id != bid);
+        g.no_updates.retain(|r| r.book_id != bid);
         if row.is_ignored || !row.has_update {
             g.no_updates.push(row);
         } else {
             g.updates.push(row);
         }
+        g.updated_ms = now_ms();
+    }
+
+    pub(crate) fn push_progress(&self, scanned: usize, total: usize) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        // 扫描期间只更新进度，不累积单本结果（避免与 ② 保留的旧数据重复）；finish 用完整结果原子替换。
+        g.running = true;
+        g.scanned = scanned;
+        g.total = total;
+        g.updated_ms = now_ms();
     }
 
     pub(crate) fn finish(

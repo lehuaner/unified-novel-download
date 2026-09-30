@@ -105,7 +105,11 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/api/jobs/:id/format",
             post(routes::jobs::submit_format_choice),
         )
-        .route("/api/updates", get(routes::updates::api_updates));
+        .route("/api/updates", get(routes::updates::api_updates))
+        .route(
+            "/api/updates/refresh-one",
+            post(routes::updates::api_updates_refresh_one),
+        );
 
     protected
         .layer(from_fn_with_state(state.clone(), auth_and_log_mw))

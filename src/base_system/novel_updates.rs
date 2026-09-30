@@ -14,7 +14,7 @@ use serde_json::Value;
 
 use crate::network_parser::network::{FanqieWebConfig, FanqieWebNetwork};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NovelUpdateRow {
     pub book_id: String,
     pub book_name: String,
@@ -65,6 +65,28 @@ struct CachedRemoteTotal {
 const UPDATE_CACHE_FILE: &str = ".tnd_update_cache.json";
 const UPDATE_CACHE_TTL_MS: u64 = 10 * 60 * 1000;
 const UPDATE_SCAN_WORKERS: usize = 4;
+/// 冷启动秒显用的完整扫描结果快照（区别于逐本 remote_total 的 TTL 缓存）。
+const UPDATE_SNAPSHOT_FILE: &str = ".tnd_update_snapshot.json";
+
+/// 完整扫描结果快照：供服务重启后冷启动秒显，避免首屏空白。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UpdateSnapshot {
+    pub updated_ms: u64,
+    pub updates: Vec<NovelUpdateRow>,
+    pub no_updates: Vec<NovelUpdateRow>,
+}
+
+/// 读取磁盘扫描快照（无或损坏返回 None）。
+pub fn load_update_snapshot(save_dir: &Path) -> Option<UpdateSnapshot> {
+    let raw = fs::read_to_string(save_dir.join(UPDATE_SNAPSHOT_FILE)).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn save_update_snapshot(save_dir: &Path, snap: &UpdateSnapshot) {
+    if let Ok(raw) = serde_json::to_string_pretty(snap) {
+        let _ = fs::write(save_dir.join(UPDATE_SNAPSHOT_FILE), raw);
+    }
+}
 
 /// 扫描保存目录下的书籍缓存文件夹（新版为 `<book_id>`，兼容旧版 `<book_id>_<book_name>`），并对比远端目录。
 ///
@@ -74,9 +96,22 @@ pub fn scan_novel_updates(save_dir: &Path) -> Result<NovelUpdateScanResult> {
     scan_novel_updates_with_progress(save_dir, |_| {})
 }
 
-/// 带进度回调的更新扫描。回调会在每本书拿到远端章节数后立即触发，适合 TUI/CLI 边扫边显示。
+/// 带进度回调的更新扫描（默认并发）。回调会在每本书拿到远端章节数后立即触发，适合 TUI/CLI 边扫边显示。
 pub fn scan_novel_updates_with_progress<F>(
     save_dir: &Path,
+    on_progress: F,
+) -> Result<NovelUpdateScanResult>
+where
+    F: FnMut(NovelUpdateProgress),
+{
+    scan_novel_updates_with_workers(save_dir, UPDATE_SCAN_WORKERS, on_progress)
+}
+
+/// 可指定并发度的更新扫描；`workers=1` 即串行（一次一本），用于冷启动后台静默刷新以降低资源冲击。
+/// 扫描完成后把完整结果落盘为快照，供下次冷启动秒显。
+pub fn scan_novel_updates_with_workers<F>(
+    save_dir: &Path,
+    workers: usize,
     mut on_progress: F,
 ) -> Result<NovelUpdateScanResult>
 where
@@ -123,7 +158,7 @@ where
     }
 
     if !needs_refresh.is_empty() {
-        let fetched = fetch_remote_totals_streaming(needs_refresh, |book_id, remote_total| {
+        let fetched = fetch_remote_totals_streaming(needs_refresh, workers, |book_id, remote_total| {
             cache.entries.insert(
                 book_id.clone(),
                 CachedRemoteTotal {
@@ -172,10 +207,19 @@ where
 
     updates.sort_by_key(|item| Reverse(item.new_count));
 
-    Ok(NovelUpdateScanResult {
+    let result = NovelUpdateScanResult {
         updates,
         no_updates,
-    })
+    };
+    save_update_snapshot(
+        save_dir,
+        &UpdateSnapshot {
+            updated_ms: now_ms(),
+            updates: result.updates.clone(),
+            no_updates: result.no_updates.clone(),
+        },
+    );
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -296,6 +340,35 @@ fn save_update_cache(save_dir: &Path, cache: &UpdateCacheFile) {
     let _ = fs::write(path, raw);
 }
 
+/// 单本刷新远端章节数（供预览页“信息更新”联动下载库徽标）：强制绕过 TTL 拉取该书最新
+/// remote_total，写回逐本缓存，并返回其更新行（本地计数即时重算）。
+pub fn refresh_one_remote(save_dir: &Path, book_id: &str) -> Result<Option<NovelUpdateRow>> {
+    let Some(book) = collect_local_book_statuses(save_dir)?
+        .into_iter()
+        .find(|b| b.book_id == book_id)
+    else {
+        return Ok(None);
+    };
+    let client = FanqieWebNetwork::new(FanqieWebConfig::default())?;
+    let remote_total = client
+        .fetch_chapter_list(book_id)
+        .map(|l| l.len())
+        .unwrap_or(0);
+    if remote_total == 0 {
+        return Ok(None);
+    }
+    let mut cache = load_update_cache(save_dir);
+    cache.entries.insert(
+        book_id.to_string(),
+        CachedRemoteTotal {
+            remote_total,
+            checked_ms: now_ms(),
+        },
+    );
+    save_update_cache(save_dir, &cache);
+    Ok(Some(row_from_book(&book, remote_total)))
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -305,6 +378,7 @@ fn now_ms() -> u64 {
 
 fn fetch_remote_totals_streaming<F>(
     book_ids: Vec<String>,
+    max_workers: usize,
     mut on_result: F,
 ) -> HashMap<String, usize>
 where
@@ -314,7 +388,7 @@ where
         return HashMap::new();
     }
 
-    let workers = book_ids.len().clamp(1, UPDATE_SCAN_WORKERS);
+    let workers = book_ids.len().clamp(1, max_workers.max(1));
     let queue = Arc::new(Mutex::new(VecDeque::from(book_ids)));
     let (tx, rx) = mpsc::channel();
     let mut handles = Vec::with_capacity(workers);
