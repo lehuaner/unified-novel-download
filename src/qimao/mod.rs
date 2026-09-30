@@ -748,8 +748,23 @@ pub fn search_items(
         {
             continue;
         }
+        // 七猫连载书常把“分类·状态·字数”塞进 sub_title，而 words_num/is_over 为 null；
+        // 故先取专字段，缺失时回退从 sub_title 解析，保证连载卡与完结卡副信息一致。
+        let sub_title = pick_any_str(&b, &["sub_title", "subtitle"]).unwrap_or_default();
+        let word_count = pick_any_str(&b, &["words_num", "word_count", "words"])
+            .and_then(|s| s.parse::<usize>().ok())
+            .or_else(|| qimao_words_from_sub_title(&sub_title));
         let finished = pick_any_str(&b, &["is_over", "state", "finished"])
-            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"));
+            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+            .or_else(|| {
+                if sub_title.contains('完') && (sub_title.contains("完结") || sub_title.contains("完本")) {
+                    Some(true)
+                } else if sub_title.contains("连载") {
+                    Some(false)
+                } else {
+                    None
+                }
+            });
         items.push(serde_json::json!({
             "book_id": book_id,
             "title": title,
@@ -758,7 +773,7 @@ pub fn search_items(
             "description": desc,
             "cover_url": cover,
             "category": pick_any_str(&b, &["category_name", "category", "cate", "first_category_name"]),
-            "word_count": pick_any_str(&b, &["words_num", "word_count", "words"]).and_then(|s| s.parse::<usize>().ok()),
+            "word_count": word_count,
             "chapter_count": pick_any_str(&b, &["chapter_total", "chapter_num", "chapter_count"]).and_then(|s| s.parse::<usize>().ok()),
             "finished": finished,
             "score": pick_any_str(&b, &["score", "book_score"]).and_then(|s| s.parse::<f32>().ok()),
@@ -767,6 +782,27 @@ pub fn search_items(
         }));
     }
     Ok((items, got >= 10))
+}
+
+/// 从七猫 sub_title（形如 "扮猪吃虎・仙帝・连载・1648万字"）末尾解析字数，返回字符数。
+fn qimao_words_from_sub_title(s: &str) -> Option<usize> {
+    let seg = s
+        .split(['・', '·', '|', '，', ',', ' '])
+        .rev()
+        .find(|p| p.trim().ends_with('字'))?;
+    let core = seg.trim().trim_end_matches('字');
+    let (mult, digits) = if let Some(d) = core.strip_suffix('亿') {
+        (100_000_000usize, d)
+    } else if let Some(d) = core.strip_suffix('万') {
+        (10_000usize, d)
+    } else {
+        (1usize, core)
+    };
+    let num: f64 = digits.trim().parse().ok()?;
+    if num <= 0.0 {
+        return None;
+    }
+    Some((num * mult as f64) as usize)
 }
 
 /// 构建七猫「筛选器」元数据，**复用番茄 selector 的同构结构**（相同 selector_item_id 命名），

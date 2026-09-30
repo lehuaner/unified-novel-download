@@ -17,7 +17,8 @@ use crate::base_system::book_paths::{
 use crate::base_system::context::safe_fs_name;
 use crate::base_system::download_history::read_download_history_deduped;
 use crate::base_system::json_extract::to_public_jpeg_cover;
-use crate::ui::web::state::{AppState, LibraryScanRow, LibraryScanStore};
+use crate::base_system::novel_updates;
+use crate::ui::web::state::{AppState, LibraryScanRow, LibraryScanStore, UpdateScanRow};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct LibraryQuery {
@@ -154,9 +155,28 @@ pub(crate) async fn api_library_books(
     let root = state.library_root.as_ref().clone();
     let limit = q.limit.unwrap_or(500).clamp(1, 2000);
     let name_kw = q.name.clone();
-    let books = tokio::task::spawn_blocking(move || build_books(&root, limit, name_kw.as_deref()))
+    let mut books = tokio::task::spawn_blocking(move || build_books(&root, limit, name_kw.as_deref()))
         .await
         .unwrap_or_default();
+
+    // #5：把可更新扫描快照并入书籍接口，前端一次取到，徽标不再依赖二次请求而延迟出现。
+    let snap = state.update_scan.snapshot();
+    let mut umap: HashMap<String, &UpdateScanRow> = HashMap::new();
+    for row in snap.updates.iter().chain(snap.no_updates.iter()) {
+        umap.entry(row.book_id.clone()).or_insert(row);
+    }
+    for b in books.iter_mut() {
+        let bid = b.get("book_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if bid.is_empty() {
+            continue;
+        }
+        if let Some(row) = umap.get(&bid) {
+            b["new_count"] = json!(row.new_count);
+            b["local_total"] = json!(row.local_total);
+            b["remote_total"] = json!(row.remote_total);
+            b["has_update"] = json!(row.has_update);
+        }
+    }
     Json(json!({ "books": books }))
 }
 
@@ -250,7 +270,25 @@ fn build_books(root: &Path, limit: usize, name_kw: Option<&str>) -> Vec<Value> {
         {
             continue;
         }
-        let author = rec.map(|r| r.author.clone()).unwrap_or_default();
+        let author_hist = rec.map(|r| r.author.clone()).unwrap_or_default();
+        // 下载历史缺元信息时（旧版未将简介/评分等写进历史），回读该书目录下的 status.json 兑底。
+        let status_meta = rec
+            .filter(|r| !r.book_id.trim().is_empty())
+            .and_then(|r| {
+                novel_updates::read_status_json(
+                    &root.join(book_folder_name(&r.book_id, None)),
+                    &r.book_id,
+                )
+            });
+        let status_str = |key: &str| -> String {
+            status_meta
+                .as_ref()
+                .and_then(|v| v.get(key).and_then(|s| s.as_str()))
+                .unwrap_or_default()
+                .to_string()
+        };
+        let author =
+            if author_hist.trim().is_empty() { status_str("author") } else { author_hist };
         // 封面优先用下载时已存到缓存目录(<book_id>/cover.*)的图片；
         // 其次回退下载历史里的 cover_url（归一化为公网 JPEG）。
         let mut cover_url = None;
@@ -266,18 +304,49 @@ fn build_books(root: &Path, limit: usize, name_kw: Option<&str>) -> Vec<Value> {
             }
         }
 
+        // 预计算待回退字段（json! 宏不支持内联块表达式）。
+        let category_hist = rec.map(|r| r.category.clone()).unwrap_or_default();
+        let category =
+            if category_hist.trim().is_empty() { status_str("category") } else { category_hist };
+        let description_hist = rec.map(|r| r.description.clone()).unwrap_or_default();
+        let description = if description_hist.trim().is_empty() {
+            status_str("description")
+        } else {
+            description_hist
+        };
+        let score = rec.and_then(|r| r.score).or_else(|| {
+            status_meta
+                .as_ref()
+                .and_then(|v| v.get("score"))
+                .and_then(|s| s.as_f64())
+                .map(|f| f as f32)
+        });
+        let word_count = rec.and_then(|r| r.word_count).or_else(|| {
+            status_meta
+                .as_ref()
+                .and_then(|v| v.get("word_count"))
+                .and_then(|s| s.as_u64())
+                .map(|n| n as usize)
+        });
+        let finished = rec.and_then(|r| r.finished).or_else(|| {
+            status_meta
+                .as_ref()
+                .and_then(|v| v.get("finished"))
+                .and_then(|s| s.as_bool())
+        });
+
         out.push(json!({
             "stem": a.stem,
             "book_id": rec.map(|r| r.book_id.clone()).unwrap_or_default(),
             "title": title,
             "author": author,
             "cover_url": cover_url,
-            "category": rec.map(|r| r.category.clone()).unwrap_or_default(),
-            "description": rec.map(|r| r.description.clone()).unwrap_or_default(),
-            "score": rec.and_then(|r| r.score),
-            "word_count": rec.and_then(|r| r.word_count),
+            "category": category,
+            "description": description,
+            "score": score,
+            "word_count": word_count,
             "chapter_count": rec.map(|r| r.selected_chapters).filter(|n| *n > 0),
-            "finished": rec.and_then(|r| r.finished),
+            "finished": finished,
             "read_count_text": rec.map(|r| r.read_count_text.clone()).unwrap_or_default(),
             "format": a.main_ext,
             "main_rel": main_rel,

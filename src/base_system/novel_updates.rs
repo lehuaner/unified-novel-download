@@ -25,6 +25,9 @@ pub struct NovelUpdateRow {
     pub new_count: usize,
     pub has_update: bool,
     pub is_ignored: bool,
+    /// 服务器返回的完结状态（true=完结）；#4 后台扫描据此判定是否停扫。
+    #[serde(default)]
+    pub finished: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -60,6 +63,8 @@ struct UpdateCacheFile {
 struct CachedRemoteTotal {
     remote_total: usize,
     checked_ms: u64,
+    #[serde(default)]
+    finished: Option<bool>,
 }
 
 const UPDATE_CACHE_FILE: &str = ".tnd_update_cache.json";
@@ -67,6 +72,10 @@ const UPDATE_CACHE_TTL_MS: u64 = 10 * 60 * 1000;
 const UPDATE_SCAN_WORKERS: usize = 4;
 /// 冷启动秒显用的完整扫描结果快照（区别于逐本 remote_total 的 TTL 缓存）。
 const UPDATE_SNAPSHOT_FILE: &str = ".tnd_update_snapshot.json";
+/// #4：连载中书籍后台静默重扫的调度状态（每本一条，记录递增周期与上次结果）。
+const UPDATE_SCHEDULE_FILE: &str = ".tnd_update_schedule.json";
+const SCAN_DAY_MS: u64 = 24 * 60 * 60 * 1000;
+const SCAN_INTERVAL_CAP_DAYS: u64 = 10;
 
 /// 完整扫描结果快照：供服务重启后冷启动秒显，避免首屏空白。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -144,6 +153,7 @@ where
                 record_update_row(
                     book,
                     cached.remote_total,
+                    cached.finished,
                     total,
                     &mut scanned,
                     &mut emitted,
@@ -158,28 +168,31 @@ where
     }
 
     if !needs_refresh.is_empty() {
-        let fetched = fetch_remote_totals_streaming(needs_refresh, workers, |book_id, remote_total| {
-            cache.entries.insert(
-                book_id.clone(),
-                CachedRemoteTotal {
-                    remote_total,
-                    checked_ms: now,
-                },
-            );
-
-            if let Some(book) = by_id.get(&book_id) {
-                record_update_row(
-                    book,
-                    remote_total,
-                    total,
-                    &mut scanned,
-                    &mut emitted,
-                    &mut updates,
-                    &mut no_updates,
-                    &mut on_progress,
+        let fetched =
+            fetch_remote_totals_streaming(needs_refresh, workers, |book_id, remote_total, finished| {
+                cache.entries.insert(
+                    book_id.clone(),
+                    CachedRemoteTotal {
+                        remote_total,
+                        checked_ms: now,
+                        finished,
+                    },
                 );
-            }
-        });
+
+                if let Some(book) = by_id.get(&book_id) {
+                    record_update_row(
+                        book,
+                        remote_total,
+                        finished,
+                        total,
+                        &mut scanned,
+                        &mut emitted,
+                        &mut updates,
+                        &mut no_updates,
+                        &mut on_progress,
+                    );
+                }
+            });
 
         // 如果本轮刷新失败但有旧缓存，先用旧缓存顶上，避免“无结果”导致 UI 看起来像书消失。
         for book in &local_books {
@@ -192,6 +205,7 @@ where
                 record_update_row(
                     book,
                     cached.remote_total,
+                    cached.finished,
                     total,
                     &mut scanned,
                     &mut emitted,
@@ -226,6 +240,7 @@ where
 fn record_update_row<F>(
     book: &LocalBookStatus,
     remote_total: usize,
+    finished: Option<bool>,
     total: usize,
     scanned: &mut usize,
     emitted: &mut HashSet<String>,
@@ -239,7 +254,7 @@ fn record_update_row<F>(
         return;
     }
 
-    let row = row_from_book(book, remote_total);
+    let row = row_from_book(book, remote_total, finished);
     *scanned += 1;
     on_progress(NovelUpdateProgress {
         row: row.clone(),
@@ -254,7 +269,7 @@ fn record_update_row<F>(
     }
 }
 
-fn row_from_book(book: &LocalBookStatus, remote_total: usize) -> NovelUpdateRow {
+fn row_from_book(book: &LocalBookStatus, remote_total: usize, finished: Option<bool>) -> NovelUpdateRow {
     let new_count = remote_total.saturating_sub(book.local_total);
     let has_update = new_count > 0 || book.local_failed > 0;
 
@@ -268,6 +283,7 @@ fn row_from_book(book: &LocalBookStatus, remote_total: usize) -> NovelUpdateRow 
         new_count,
         has_update,
         is_ignored: book.is_ignored,
+        finished,
     }
 }
 
@@ -357,16 +373,18 @@ pub fn refresh_one_remote(save_dir: &Path, book_id: &str) -> Result<Option<Novel
     if remote_total == 0 {
         return Ok(None);
     }
+    let finished = client.get_book_info(book_id).8;
     let mut cache = load_update_cache(save_dir);
     cache.entries.insert(
         book_id.to_string(),
         CachedRemoteTotal {
             remote_total,
             checked_ms: now_ms(),
+            finished,
         },
     );
     save_update_cache(save_dir, &cache);
-    Ok(Some(row_from_book(&book, remote_total)))
+    Ok(Some(row_from_book(&book, remote_total, finished)))
 }
 
 fn now_ms() -> u64 {
@@ -380,9 +398,9 @@ fn fetch_remote_totals_streaming<F>(
     book_ids: Vec<String>,
     max_workers: usize,
     mut on_result: F,
-) -> HashMap<String, usize>
+) -> HashMap<String, Option<bool>>
 where
-    F: FnMut(String, usize),
+    F: FnMut(String, usize, Option<bool>),
 {
     if book_ids.is_empty() {
         return HashMap::new();
@@ -401,9 +419,9 @@ where
     drop(tx);
 
     let mut results = HashMap::new();
-    for (book_id, remote_total) in rx {
-        results.insert(book_id.clone(), remote_total);
-        on_result(book_id, remote_total);
+    for (book_id, remote_total, finished) in rx {
+        results.insert(book_id.clone(), finished);
+        on_result(book_id, remote_total, finished);
     }
 
     for handle in handles {
@@ -415,7 +433,7 @@ where
 
 fn fetch_remote_totals_worker(
     queue: Arc<Mutex<VecDeque<String>>>,
-    tx: mpsc::Sender<(String, usize)>,
+    tx: mpsc::Sender<(String, usize, Option<bool>)>,
 ) {
     let Ok(client) = FanqieWebNetwork::new(FanqieWebConfig::default()) else {
         return;
@@ -426,7 +444,9 @@ fn fetch_remote_totals_worker(
             .map(|list| list.len())
             .filter(|n| *n > 0);
         if let Some(total) = total {
-            let _ = tx.send((book_id, total));
+            // #4：同时拉取服务器完结状态（详情页），供后台扫描判定“连载转完结→停扫”。
+            let finished = client.get_book_info(&book_id).8;
+            let _ = tx.send((book_id, total, finished));
         }
     }
 }
@@ -487,7 +507,7 @@ pub fn read_status_counts_and_ignore(
 }
 
 /// 读取并解析 status.json（或旧格式 chapter_status_<id>.json）。
-fn read_status_json(folder: &Path, book_id: &str) -> Option<Value> {
+pub(crate) fn read_status_json(folder: &Path, book_id: &str) -> Option<Value> {
     let status_new = folder.join("status.json");
     let status_old = folder.join(format!("chapter_status_{}.json", book_id));
     let path = if status_new.exists() {
@@ -527,4 +547,164 @@ fn counts_from_status(value: &Value) -> Option<(usize, usize, usize)> {
     }
     let failed = total.saturating_sub(ok);
     Some((total, ok, failed))
+}
+
+// ── #4 连载中书籍后台静默重扫 ───────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ScheduleEntry {
+    /// 首次被识别为连载中的时刻（首扫排在其次日）。
+    first_seen_ms: u64,
+    /// 上次扫描时刻；0 表示登记后尚未扫过（据此排“次日首扫”）。
+    last_scan_ms: u64,
+    /// 当前扫描间隔（天），1..=10。有更新重置为 1，无更新递增。
+    interval_days: u64,
+    /// 上次扫描时的远端章节数，用于判断本轮是否有更新。
+    last_remote_total: usize,
+    /// 服务器完结态缓存。
+    finished: Option<bool>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ScheduleFile {
+    #[serde(default)]
+    entries: HashMap<String, ScheduleEntry>,
+}
+
+fn load_schedule(save_dir: &Path) -> ScheduleFile {
+    let path = save_dir.join(UPDATE_SCHEDULE_FILE);
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_schedule(save_dir: &Path, sf: &ScheduleFile) {
+    let path = save_dir.join(UPDATE_SCHEDULE_FILE);
+    if let Ok(raw) = serde_json::to_string_pretty(sf) {
+        let _ = fs::write(path, raw);
+    }
+}
+
+/// 后台扫描一轮：只对“连载中”的书按各自递增周期做单本探测（串行，一次一本）。
+/// 返回本轮实际重扫并产生新结果的行，供调用方回写内存快照。规则（严格照需求）：
+/// - 只扫连载中（服务器 finished==Some(false)）的书；新入的连载书次日作为第一次扫描。
+/// - 有更新（章节数增大）→ 间隔回到 1 天；无更新 → 间隔 +1 天，封顶 10 天。
+/// - 服务器完结（finished==true）→ 移出调度，不再扫描。
+/// 扫描范围：`collect_local_book_statuses` 仅收录纯数字目录（番茄），故七猫/书旗不在此路径。
+pub fn serializing_scan_due(save_dir: &Path) -> Result<Vec<NovelUpdateRow>> {
+    let books = collect_local_book_statuses(save_dir)?;
+    let now = now_ms();
+    let mut schedule = load_schedule(save_dir);
+    let mut cache = load_update_cache(save_dir);
+
+    // 1) 依已知完结态登记候选（仅未忽略且确知连载中的书）。
+    for book in &books {
+        if book.is_ignored {
+            schedule.entries.remove(&book.book_id);
+            continue;
+        }
+        if schedule.entries.contains_key(&book.book_id) {
+            continue;
+        }
+        if cache.entries.get(&book.book_id).and_then(|c| c.finished) == Some(false) {
+            schedule.entries.insert(
+                book.book_id.clone(),
+                ScheduleEntry {
+                    first_seen_ms: now,
+                    last_scan_ms: 0,
+                    interval_days: 1,
+                    last_remote_total: cache
+                        .entries
+                        .get(&book.book_id)
+                        .map(|c| c.remote_total)
+                        .unwrap_or(0),
+                    finished: Some(false),
+                },
+            );
+        }
+    }
+
+    // 2) 先算出到点的 id（避免边遍历边改 map），再串行逐本探测。
+    let due: Vec<String> = schedule
+        .entries
+        .iter()
+        .filter(|(_, e)| e.finished != Some(true))
+        .filter(|(_, e)| {
+            let next = if e.last_scan_ms == 0 {
+                e.first_seen_ms + SCAN_DAY_MS
+            } else {
+                e.last_scan_ms + e.interval_days.max(1) * SCAN_DAY_MS
+            };
+            now >= next
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+
+    if due.is_empty() {
+        save_schedule(save_dir, &schedule);
+        return Ok(Vec::new());
+    }
+
+    let client = FanqieWebNetwork::new(FanqieWebConfig::default())?;
+    let mut changed = Vec::new();
+    for bid in due {
+        let Some(book) = books.iter().find(|b| b.book_id == bid) else {
+            schedule.entries.remove(&bid);
+            continue;
+        };
+        let total = client
+            .fetch_chapter_list(&bid)
+            .map(|l| l.len())
+            .filter(|n| *n > 0);
+        let Some(total) = total else {
+            // 探测失败：仅顺延时间，避免每个 tick 反复重试同一本；不动 last_remote_total/间隔。
+            if let Some(e) = schedule.entries.get_mut(&bid) {
+                e.last_scan_ms = now;
+            }
+            continue;
+        };
+        let finished = client.get_book_info(&bid).8;
+
+        {
+            let e = schedule.entries.entry(bid.clone()).or_insert(ScheduleEntry {
+                first_seen_ms: now,
+                last_scan_ms: 0,
+                interval_days: 1,
+                last_remote_total: 0,
+                finished: None,
+            });
+            let grew = total > e.last_remote_total;
+            if finished == Some(true) {
+                e.finished = Some(true);
+            } else {
+                e.finished = finished;
+                if grew {
+                    e.interval_days = 1;
+                } else {
+                    e.interval_days = (e.interval_days.max(1) + 1).min(SCAN_INTERVAL_CAP_DAYS);
+                }
+            }
+            e.last_scan_ms = now;
+            e.last_remote_total = total;
+        }
+
+        cache.entries.insert(
+            bid.clone(),
+            CachedRemoteTotal {
+                remote_total: total,
+                checked_ms: now,
+                finished,
+            },
+        );
+        changed.push(row_from_book(book, total, finished));
+
+        if finished == Some(true) {
+            schedule.entries.remove(&bid);
+        }
+    }
+
+    save_update_cache(save_dir, &cache);
+    save_schedule(save_dir, &schedule);
+    Ok(changed)
 }

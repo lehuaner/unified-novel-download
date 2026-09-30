@@ -160,6 +160,12 @@ async fn run_async(
         state.library_scan.clone(),
     );
 
+    // #5：冷启动载入可更新快照并串行扫描一次，供 /api/library/books 并入徽标（前端不再首次自动拉 /api/updates）。
+    routes::updates::boot_scan(&state);
+
+    // #4：后台静默重扫调度器（仅连载中的书，递增周期 1→10 天，服务器完结即停）。
+    routes::updates::spawn_serializing_scheduler(state.clone());
+
     let locked = state.auth.is_some();
 
     // Shared shutdown trigger for all listeners.

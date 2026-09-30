@@ -290,7 +290,7 @@ function bookCard(o) {
     ? `<img class="book-card-cover" src="${esc(cs)}" alt="" loading="lazy" data-initial="${initial}" onerror="bookCoverError(this)">`
     : `<div class="book-card-cover cover-failed">${initial}</div>`;
   const coverFormat = o.coverFormat ? `<span class="cover-format-badge">${esc(o.coverFormat)}</span>` : '';
-  const coverBox = `<div class="book-card-cover-box"><span class="cover-media">${coverHtml}${coverFormat}</span><span class="cover-badge-down"></span>${o.coverBadge || ''}</div>`;
+  const coverBox = `<div class="book-card-cover-box"><span class="cover-media">${coverHtml}${coverFormat}</span><span class="cover-badge-down">${o.coverBadgeDown || ''}</span>${o.coverBadge || ''}</div>`;
   const hasScore = o.score != null && o.score !== '' && !isNaN(Number(o.score));
   const scoreHtml = hasScore ? `<span class="book-card-score" title="评分">★ ${Number(o.score).toFixed(1)}</span>` : '';
   const badges = (o.badges || []).filter(b => b && (b.icon || b.text))
@@ -981,6 +981,7 @@ let jobStaticDone = new Set();
 let jobsCursor = 0;     // /api/jobs 的 since 游标
 let jobsEpoch = '';     // 后端任务表纪元，变化即说明内存任务表已换一批
 let jobsActiveCount = 0; // 上一次轮询的活跃任务数，用于判断“有任务结束”
+let prevActiveJobBids = new Set(); // 上一次轮询的活跃任务 book_id，用于识别“刚完成”的书触发单本重算
 
 function resetJobsState() {
   jobsMap.clear();
@@ -1079,17 +1080,17 @@ function bookLibraryCard(b) {
   const coverFormat = b.format ? String(b.format).toUpperCase() : (b.main_is_dir ? '文件夹' : '');
   if (b.has_audio) badges.push({ text: '有声', cls: 'tag-orange' });
   badges.push(sourceBadge(bid));
-  const up = updateMap[bid];
-  const updBadge = (up && Number(up.new_count) > 0)
-    ? `<span class="update-badge" title="本地 ${Number(up.local_total) || 0}/${Number(up.remote_total) || 0} 章，可更新 +${Number(up.new_count)} 章">可更新 +${Number(up.new_count)}</span>`
+  const newCount = Number(b.new_count) || 0;
+  const updBadge = newCount > 0
+    ? `<span class="update-badge" title="本地 ${Number(b.local_total) || 0}/${Number(b.remote_total) || 0} 章，可更新 +${newCount} 章">可更新 +${newCount}</span>`
     : '';
   const dlBtn = `<button type="button" class="libDl icon-btn" data-href="${esc(dlHref)}" title="下载成品文件">${ICON_DL}</button>`;
   const delBtn = `<button type="button" class="libDelete icon-btn danger" data-paths="${esc(JSON.stringify(b.paths || [mainRel]))}" data-title="${esc(b.title || b.stem || '')}" title="删除文件">${ICON_DEL}</button>`;
-  const foot = `<span class="book-card-foot-left">${updBadge}</span><span class="book-card-actions">${dlBtn}${delBtn}</span>`;
+  const foot = `<span class="book-card-foot-left"></span><span class="book-card-actions">${dlBtn}${delBtn}</span>`;
   return bookCard({
     cover: b.cover_url, title: b.title || b.stem, author: b.author,
     desc: b.description, score: b.score, meta: searchCardMeta(b),
-    badges, foot, bookId: bid, coverFormat,
+    badges, foot, bookId: bid, coverFormat, coverBadgeDown: updBadge,
   });
 }
 
@@ -1127,30 +1128,6 @@ function renderLibraryGrid() {
   }
   const hint = document.getElementById('libHint');
   if (hint) hint.textContent = `已下载 ${libraryBooksCache.length} 本` + (active.length ? ` · 进行中 ${active.length}` : '');
-  layoutUpdateBadges();
-}
-
-// 窄屏（两列）下卡片底栏变窄，“可更新”徽标会与下载/删除按钮重叠：
-// 渲染后实测两者包围盒，仅在真发生重叠时把徽标挪到封面下方，不重叠则留在底栏原位。
-// 选择器不绑定容器：下载库(#libraryBooks)与首页“最近下载”(#recentDownloads)用同一张 bookLibraryCard，故同受此逻辑处理。
-function layoutUpdateBadges() {
-  document.querySelectorAll('.update-badge').forEach(badge => {
-    const card = badge.closest('.book-card');
-    if (!card) return;
-    const downSlot = card.querySelector('.cover-badge-down');
-    const footLeft = badge.closest('.book-card-foot-left');
-    if (!downSlot || !footLeft) return;
-    const acts = card.querySelector('.book-card-actions');
-    let overlap = false;
-    // 卡片不可见（section 未激活）时包围盒全为 0，不做判定也不挪动。
-    if (acts && card.offsetWidth > 0) {
-      const a = badge.getBoundingClientRect();
-      const b = acts.getBoundingClientRect();
-      overlap = a.right > b.left + 1 && b.right > a.left + 1;
-    }
-    if (overlap && badge.parentElement !== downSlot) downSlot.appendChild(badge);
-    else if (!overlap && badge.parentElement !== footLeft) footLeft.appendChild(badge);
-  });
 }
 
 // 拉取磁盘成品书并渲染（下载/删除/任务结束后调用）。
@@ -1394,7 +1371,6 @@ function renderRecentList() {
   const { active, books, downloadedBids } = libraryView();
   const cards = jobCardsHtml(active, downloadedBids) + books.slice(0, 6).map(bookLibraryCard).join('');
   box.innerHTML = cards || '<span class="k">暂无已下载书籍</span>';
-  layoutUpdateBadges();
 }
 
 // 重置到搜索前首页状态（清空结果/工具栏/统计，恢复首页面板）。
@@ -1715,8 +1691,8 @@ function applyPreview(preview, hintCoverUrl, requestSerial, bookId, fromCache) {
   const confirmBtn = document.getElementById('previewConfirm');
   if (confirmBtn) {
     const pbid = String((preview && preview.book_id) || bookId || '');
-    const up = updateMap[pbid];
-    confirmBtn.textContent = (up && Number(up.new_count) > 0) ? '确认更新' : '确认下载';
+    const hit = (libraryBooksCache || []).find(x => String(x.book_id) === pbid);
+    confirmBtn.textContent = (hit && Number(hit.new_count) > 0) ? '确认更新' : '确认下载';
   }
 }
 
@@ -1865,11 +1841,20 @@ async function syncJobs(full) {
   if (need.length) await fetchJobStatic(need);
 
   const list = jobsList();
-  const nowActive = list.filter(isJobActive).length;
+  const activeNow = list.filter(isJobActive);
+  const nowActive = activeNow.length;
+  const curBids = new Set(activeNow.map(it => String(it.book_id || '').trim()).filter(Boolean));
+  const finishedBids = [...prevActiveJobBids].filter(b => !curBids.has(b));
+  prevActiveJobBids = curBids;
   // 有任务结束 → 重扫磁盘，新落库成品接管展示（同书不双卡）。
   if (nowActive < jobsActiveCount) {
     refreshLibrary().catch(() => {});
-    refreshUpdates(false).catch(() => {});
+  }
+  // #6：对刚下载完的书单本重算远端/本地章节数并回写后端快照，避免“可更新”徽标滞留在下载前的旧值。
+  if (finishedBids.length) {
+    Promise.all(finishedBids.map(bid =>
+      j('/api/updates/refresh-one?book_id=' + encodeURIComponent(bid), { method: 'POST' }).catch(() => {})
+    )).then(() => refreshLibrary().catch(() => {})).catch(() => {});
   }
   jobsActiveCount = nowActive;
   renderLibraryGrid();
@@ -1887,8 +1872,6 @@ function pollJobs() { return syncJobs(false); }
 // ── Updates ────────────────────────────────────────────────────────
 
 let updatesPollTimer = null;
-// 可更新信息：book_id -> {new_count, local_total, remote_total}，用于下载库卡片徽标（窄屏碰撞时自动挪到封面下方）。
-let updateMap = {};
 
 function scheduleUpdatesPoll() {
   if (updatesPollTimer) clearTimeout(updatesPollTimer);
@@ -1898,28 +1881,19 @@ function scheduleUpdatesPoll() {
   }, 2000);
 }
 
-// 拉取更新扫描结果，写入 updateMap 并刷新下载库卡片标记（不再单独渲染“更新”页）。
+// 触发/轮询可更新扫描。徽标数据已并入 /api/library/books，本函数只负责“跑扫描 + 完成后重取库数据”。
+// 冷启动扫描已由服务启动时 boot_scan 负责，页面加载不再调用本函数。
 async function refreshUpdates(start = true) {
   let data;
   try {
     data = await j(start ? '/api/updates' : '/api/updates?start=false');
   } catch { return; }
-
-  const updates = data.updates || [];
-  const map = {};
-  for (const it of updates) {
-    const bid = String(it.book_id || '');
-    if (!bid) continue;
-    map[bid] = {
-      new_count: Number(it.new_count || 0),
-      local_total: Number(it.local_total || 0),
-      remote_total: Number(it.remote_total || 0),
-    };
+  if (data.running) {
+    scheduleUpdatesPoll();
+  } else {
+    if (updatesPollTimer) { clearTimeout(updatesPollTimer); updatesPollTimer = null; }
+    refreshLibrary().catch(() => {});   // 扫描结束：拉取带可更新状态的库数据刷新徽标
   }
-  updateMap = map;
-  renderLibraryGrid();
-
-  if (data.running) scheduleUpdatesPoll();
 }
 
 async function cancelJob(id) {
@@ -2073,13 +2047,9 @@ function wire() {
       if (panels) panels.classList.remove('hidden');
       refreshSearchHistory().catch(() => {});
       loadRecentDownloads().catch(() => {});
-      // 首页“最近下载”与下载库同一套徽标挪位逻辑，切回时重测。
-      requestAnimationFrame(layoutUpdateBadges);
     }
     if (hash === '#library') {
       refreshLibrary().catch(() => {});
-      // 从隐藏态切回时重测一次徽标碰撞（隐藏期间渲染的结果不可信）。
-      requestAnimationFrame(layoutUpdateBadges);
     }
   }
 
@@ -2096,19 +2066,6 @@ function wire() {
   if (libRefreshBtn) libRefreshBtn.addEventListener('click', () => { refreshLibrary().catch(() => {}); refreshUpdates(true).catch(() => {}); });
   const libFilterEl = document.getElementById('libFilter');
   if (libFilterEl) libFilterEl.addEventListener('input', () => { renderLibraryGrid(); });
-
-  // 网格尺寸变化（转屏 / 列数切换 / 窗口缩放）时重测“可更新”徽标碰撞。
-  const libGridEl = document.getElementById('libraryBooks');
-  const recentEl = document.getElementById('recentDownloads');
-  if ((libGridEl || recentEl) && typeof ResizeObserver !== 'undefined') {
-    let badgeReflowRaf = 0;
-    const badgeRo = new ResizeObserver(() => {
-      if (badgeReflowRaf) cancelAnimationFrame(badgeReflowRaf);
-      badgeReflowRaf = requestAnimationFrame(() => { badgeReflowRaf = 0; layoutUpdateBadges(); });
-    });
-    if (libGridEl) badgeRo.observe(libGridEl);
-    if (recentEl) badgeRo.observe(recentEl);
-  }
 
   // 列数切换（全局，作用于所有 .book-grid）
   document.querySelectorAll('.colToggle').forEach(btn => btn.addEventListener('click', () => {
@@ -2317,14 +2274,19 @@ function wire() {
   if (previewRefresh) previewRefresh.addEventListener('click', async () => {
     if (!currentPreviewBookId) return;
     try { await openPreview(currentPreviewBookId, null, true, currentPreviewHintTitle); } catch (err) { alert(err); }
-    // ③ 联动下载库徽标：刷新该书远端章节数并回写 updateMap，无需全量重扫。
+    // #5：单本刷新后把结果写回库缓存对应书条目，徽标数值随之动态变化（无需全量重扫）。
     try {
       const r = await j('/api/updates/refresh-one?book_id=' + encodeURIComponent(currentPreviewBookId), { method: 'POST' });
       const bid = String(currentPreviewBookId);
-      if (r && r.ok && r.row) {
-        updateMap[bid] = { new_count: Number(r.row.new_count) || 0, local_total: Number(r.row.local_total) || 0, remote_total: Number(r.row.remote_total) || 0 };
-      } else {
-        delete updateMap[bid];
+      const hit = (libraryBooksCache || []).find(x => String(x.book_id) === bid);
+      if (hit) {
+        if (r && r.ok && r.row) {
+          hit.new_count = Number(r.row.new_count) || 0;
+          hit.local_total = Number(r.row.local_total) || 0;
+          hit.remote_total = Number(r.row.remote_total) || 0;
+        } else {
+          hit.new_count = 0;
+        }
       }
       renderLibraryGrid();
       renderRecentList();
@@ -2376,8 +2338,7 @@ async function boot() {
     refreshLibrary(),
     refreshSearchHistory(),
   ]);
-  // 启动不主动重扫（避免每次刷新页面重复获取）；冷启动由后端首次请求破例串行扫描一次。
-  refreshUpdates(false).catch(() => {});
+  // #5：“可更新”状态已随 refreshLibrary 一次取到（后端启动时 boot_scan 已载入快照+串行扫）；页面加载不再拉 /api/updates。
   // 定时轮询只拉变化项（since=游标），不重复传输相同数据。
   setInterval(() => pollJobs().catch(() => {}), 1500);
 }

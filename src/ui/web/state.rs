@@ -291,6 +291,9 @@ pub(crate) struct UpdateScanRow {
     pub(crate) new_count: usize,
     pub(crate) has_update: bool,
     pub(crate) is_ignored: bool,
+    /// 服务器完结态（#4 扫描产出；随快照下发供前端/调度参考）。
+    #[serde(default)]
+    pub(crate) finished: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -309,8 +312,6 @@ pub(crate) struct UpdateScanInfo {
 #[derive(Debug)]
 pub(crate) struct UpdateScanStore {
     running: AtomicBool,
-    /// 冷启动破例扫描标志：本进程首次请求置位，之后不再自动扫描。
-    boot_scanned: AtomicBool,
     inner: Mutex<UpdateScanInfo>,
 }
 
@@ -318,7 +319,6 @@ impl Default for UpdateScanStore {
     fn default() -> Self {
         Self {
             running: AtomicBool::new(false),
-            boot_scanned: AtomicBool::new(false),
             inner: Mutex::new(UpdateScanInfo {
                 running: false,
                 scanned: 0,
@@ -355,13 +355,6 @@ impl UpdateScanStore {
         g.started_ms = now;
         g.updated_ms = now;
         true
-    }
-
-    /// 冷启动破例：本进程首次调用返回 true 并置位，之后恒返回 false（不再自动扫描）。
-    pub(crate) fn take_boot_scan(&self) -> bool {
-        self.boot_scanned
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
     }
 
     /// 冷启动：把磁盘快照载入内存供首屏秒显（不触发网络）。
@@ -434,6 +427,11 @@ impl UpdateScanStore {
 
     pub(crate) fn snapshot(&self) -> UpdateScanInfo {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// 是否正在跑一轮全量/冷启动扫描（供后台连载扫描器避让，不叠加打上游）。
+    pub(crate) fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
     }
 }
 
