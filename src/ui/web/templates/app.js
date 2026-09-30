@@ -289,7 +289,7 @@ function bookCard(o) {
   const coverHtml = cs
     ? `<img class="book-card-cover" src="${esc(cs)}" alt="" loading="lazy" data-initial="${initial}" onerror="bookCoverError(this)">`
     : `<div class="book-card-cover cover-failed">${initial}</div>`;
-  const coverBox = `<div class="book-card-cover-box">${coverHtml}${o.coverBadge || ''}</div>`;
+  const coverBox = `<div class="book-card-cover-box">${coverHtml}<span class="cover-badge-down"></span>${o.coverBadge || ''}</div>`;
   const hasScore = o.score != null && o.score !== '' && !isNaN(Number(o.score));
   const scoreHtml = hasScore ? `<span class="book-card-score" title="评分">★ ${Number(o.score).toFixed(1)}</span>` : '';
   const badges = (o.badges || []).filter(b => b && (b.icon || b.text))
@@ -1127,6 +1127,29 @@ function renderLibraryGrid() {
   }
   const hint = document.getElementById('libHint');
   if (hint) hint.textContent = `已下载 ${libraryBooksCache.length} 本` + (active.length ? ` · 进行中 ${active.length}` : '');
+  layoutUpdateBadges();
+}
+
+// 窄屏（两列）下卡片底栏变窄，“可更新”徽标会与下载/删除按钮重叠：
+// 渲染后实测两者包围盒，仅在真发生重叠时把徽标挪到封面下方，不重叠则留在底栏原位。
+function layoutUpdateBadges() {
+  document.querySelectorAll('#libraryBooks .update-badge').forEach(badge => {
+    const card = badge.closest('.book-card');
+    if (!card) return;
+    const downSlot = card.querySelector('.cover-badge-down');
+    const footLeft = badge.closest('.book-card-foot-left');
+    if (!downSlot || !footLeft) return;
+    const acts = card.querySelector('.book-card-actions');
+    let overlap = false;
+    // 卡片不可见（section 未激活）时包围盒全为 0，不做判定也不挪动。
+    if (acts && card.offsetWidth > 0) {
+      const a = badge.getBoundingClientRect();
+      const b = acts.getBoundingClientRect();
+      overlap = a.right > b.left + 1 && b.right > a.left + 1;
+    }
+    if (overlap && badge.parentElement !== downSlot) downSlot.appendChild(badge);
+    else if (!overlap && badge.parentElement !== footLeft) footLeft.appendChild(badge);
+  });
 }
 
 // 拉取磁盘成品书并渲染（下载/删除/任务结束后调用）。
@@ -1862,7 +1885,7 @@ function pollJobs() { return syncJobs(false); }
 // ── Updates ────────────────────────────────────────────────────────
 
 let updatesPollTimer = null;
-// 可更新信息：book_id -> {new_count, local_total, remote_total}，用于下载库卡片左下角标记。
+// 可更新信息：book_id -> {new_count, local_total, remote_total}，用于下载库卡片徽标（窄屏碰撞时自动挪到封面下方）。
 let updateMap = {};
 
 function scheduleUpdatesPoll() {
@@ -2051,6 +2074,8 @@ function wire() {
     }
     if (hash === '#library') {
       refreshLibrary().catch(() => {});
+      // 从隐藏态切回时重测一次徽标碰撞（隐藏期间渲染的结果不可信）。
+      requestAnimationFrame(layoutUpdateBadges);
     }
   }
 
@@ -2067,6 +2092,16 @@ function wire() {
   if (libRefreshBtn) libRefreshBtn.addEventListener('click', () => { refreshLibrary().catch(() => {}); refreshUpdates(true).catch(() => {}); });
   const libFilterEl = document.getElementById('libFilter');
   if (libFilterEl) libFilterEl.addEventListener('input', () => { renderLibraryGrid(); });
+
+  // 网格尺寸变化（转屏 / 列数切换 / 窗口缩放）时重测“可更新”徽标碰撞。
+  const libGridEl = document.getElementById('libraryBooks');
+  if (libGridEl && typeof ResizeObserver !== 'undefined') {
+    let badgeReflowRaf = 0;
+    new ResizeObserver(() => {
+      if (badgeReflowRaf) cancelAnimationFrame(badgeReflowRaf);
+      badgeReflowRaf = requestAnimationFrame(() => { badgeReflowRaf = 0; layoutUpdateBadges(); });
+    }).observe(libGridEl);
+  }
 
   // 列数切换（全局，作用于所有 .book-grid）
   document.querySelectorAll('.colToggle').forEach(btn => btn.addEventListener('click', () => {

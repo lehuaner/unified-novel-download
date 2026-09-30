@@ -979,6 +979,10 @@ button.success {
 .book-card-desc-empty { color: var(--text-muted); font-style: italic; }
 .book-card-foot { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding-top: 6px; }
 .book-card-foot-left { display: inline-flex; align-items: flex-end; min-width: 0; }
+/* “可更新”徽标窄屏碰撞时挪到封面下方（JS 实测重叠后才挂入此插槽） */
+.cover-badge-down { display: none; }
+.cover-badge-down:has(.update-badge) { display: block; margin-top: 4px; }
+.cover-badge-down .update-badge { max-width: 56px; justify-content: center; font-size: .58rem; padding: 0 4px; }
 .book-card-id { font-size: .72rem; background: var(--code-bg); color: var(--code-color); padding: 1px 6px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%; }
 .book-card-foot .book-card-score { flex: 0 0 auto; }
 /* 整卡可点预览 */
