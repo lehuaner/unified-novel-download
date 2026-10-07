@@ -435,6 +435,39 @@ impl ShuqiClient {
         decode_content(encoded).ok_or_else(|| anyhow!("content: decode failed"))
     }
 
+    /// 按书名走网关搜索取连载/完结态（`book.state`：2=完结、1=连载），并用 bookId 精确匹配。
+    ///
+    /// 背景：`openapi/book/chapterlist` 的响应里根本不存在 `isFinish`（`state` 键存在但为 null），
+    /// 而网关搜索卡片带 `state`。
+    ///
+    /// 为何不用 bid 当关键词：实测 `native_search_modules("9349463", 1)` 会正常返回十余张卡片
+    /// （均带 state），但**其中不包含 9349463 本身**（书旗把纯数字当文本匹配了别的书）。
+    /// 因此用书名搜索，再按 bookId 对齐；匹配不到就返回 None，绝不用同名异书的卡片充数。
+    /// 本方法**仅供更新调度判定使用**，不参与搜索结果的展示语义。
+    pub fn book_state_by_search(&self, book_id: &str, book_name: &str) -> Option<bool> {
+        let bid = strip_sq_prefix(book_id).to_string();
+        let kw = book_name.trim();
+        if kw.is_empty() {
+            return None;
+        }
+        let modules = self.native_search_modules(kw, 1).ok()?;
+        for m in modules {
+            if m.get("displayTemplate").and_then(Value::as_str) != Some("SearchBookV2") {
+                continue;
+            }
+            let Some(b) = m.get("book").filter(|x| x.is_object()) else {
+                continue;
+            };
+            if native_book_id(b).as_deref() != Some(bid.as_str()) {
+                continue;
+            }
+            if let Some(finished) = native_finished(b) {
+                return Some(finished);
+            }
+        }
+        None
+    }
+
     /// 尝试拉取书信息补充元数据（best-effort，失败返回 None）。
     pub fn book_info(&self, book_id: &str) -> Option<BookMeta> {
         let bid = strip_sq_prefix(book_id);
@@ -1032,5 +1065,40 @@ mod tests {
             "应拿到官方 displayBookName"
         );
         println!("有评分 {scored} / 共 {} 本", items.len());
+    }
+
+    /// 联网端到端（手动跑）：验证“按书名搜索 + bookId 精确匹配”能拿到 chapterlist 缺失的连载/完结态。
+    /// 同时留反证：按 bid 搜索命中不到目标书本身。
+    /// `cargo test -- --ignored --nocapture e2e_book_state_by_search`
+    #[test]
+    #[ignore = "需要联网访问书旗网关"]
+    fn e2e_book_state_by_search() {
+        let client = ShuqiClient::new(15).expect("client");
+
+        // 反证：bid 当关键词时，网关返回的卡片不包含目标书（因此不能靠 bid 取状态）。
+        let by_bid = client
+            .native_search_modules("9349463", 1)
+            .expect("native_v3 by bid 请求失败");
+        let hit_self = by_bid.iter().any(|m| {
+            m.get("book")
+                .and_then(native_book_id)
+                .as_deref()
+                .is_some_and(|id| id == "9349463")
+        });
+        println!("by-bid 卡片数={} 含目标书={hit_self}", by_bid.len());
+        assert!(
+            !hit_self,
+            "实测：bid 当关键词不得命中目标书，否则应改回 bid 方案"
+        );
+
+        // 正用：书名搜索 + bookId 对齐。
+        let got = client.book_state_by_search("sq:9349463", "戏神！");
+        println!("sq:9349463 书名搜索-> {got:?}");
+        assert!(got.is_some(), "按书名搜索应能取到该书连载/完结态");
+
+        // 同书名但 id 不对 → 必须 None，不得拿同名异书的卡片充数。
+        let wrong = client.book_state_by_search("sq:1", "戏神！");
+        println!("sq:1 书名搜索-> {wrong:?}");
+        assert_eq!(wrong, None);
     }
 }

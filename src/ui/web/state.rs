@@ -389,6 +389,17 @@ impl UpdateScanStore {
         g.updated_ms = now_ms();
     }
 
+    /// 用给定行集整体替换内存快照（陈旧行修正后回写用，不触碰 running 标记）。
+    pub(crate) fn replace_rows(&self, updates: Vec<UpdateScanRow>, no_updates: Vec<UpdateScanRow>) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let total = updates.len() + no_updates.len();
+        g.scanned = total;
+        g.total = total;
+        g.updates = updates;
+        g.no_updates = no_updates;
+        g.updated_ms = now_ms();
+    }
+
     pub(crate) fn push_progress(&self, scanned: usize, total: usize) {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         // 扫描期间只更新进度，不累积单本结果（避免与 ② 保留的旧数据重复）；finish 用完整结果原子替换。

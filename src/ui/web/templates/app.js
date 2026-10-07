@@ -1072,6 +1072,7 @@ function bookLibraryCard(b) {
   b = b || {};
   const ICON_DL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
   const ICON_DEL = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>';
+  const ICON_SYNC = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
   const bid = String(b.book_id || '');
   const mainRel = b.main_rel || '';
   const enc = encodePathSegments(mainRel);
@@ -1086,7 +1087,11 @@ function bookLibraryCard(b) {
     : '';
   const dlBtn = `<button type="button" class="libDl icon-btn" data-href="${esc(dlHref)}" title="下载成品文件">${ICON_DL}</button>`;
   const delBtn = `<button type="button" class="libDelete icon-btn danger" data-paths="${esc(JSON.stringify(b.paths || [mainRel]))}" data-title="${esc(b.title || b.stem || '')}" title="删除文件">${ICON_DEL}</button>`;
-  const foot = `<span class="book-card-foot-left"></span><span class="book-card-actions">${dlBtn}${delBtn}</span>`;
+  // 查更新：完结书不再后台自动跟（作者可能补章），靠这个入口手动核对。
+  const chkBtn = bid
+    ? `<button type="button" class="libCheck icon-btn" data-bid="${esc(bid)}" title="查更新：向源站核对本章数；本地进度取下载历史">${ICON_SYNC}</button>`
+    : '';
+  const foot = `<span class="book-card-foot-left"></span><span class="book-card-actions">${chkBtn}${dlBtn}${delBtn}</span>`;
   return bookCard({
     cover: b.cover_url, title: b.title || b.stem, author: b.author,
     desc: b.description, score: b.score, meta: searchCardMeta(b),
@@ -2165,6 +2170,31 @@ function wire() {
     if (dlBtn) {
       const href = dlBtn.getAttribute('data-href') || '';
       if (href) { const a = document.createElement('a'); a.href = href; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); }
+      return;
+    }
+    // 下载库：查更新——单本向源站核对章节数（本地无状态目录时后端按下载历史判定进度）；
+    // 若章节数比缓存增长，后端会把该书重新纳入递增调度继续自动复查。
+    const chkBtn = t.closest ? t.closest('.libCheck') : null;
+    if (chkBtn) {
+      const bid = chkBtn.getAttribute('data-bid') || '';
+      if (!bid) return;
+      chkBtn.disabled = true;
+      try {
+        const r = await j('/api/updates/refresh-one?book_id=' + encodeURIComponent(bid), { method: 'POST' });
+        const hit = (libraryBooksCache || []).find(x => String(x.book_id) === bid);
+        if (hit) {
+          if (r && r.ok && r.row) {
+            hit.new_count = Number(r.row.new_count) || 0;
+            hit.local_total = Number(r.row.local_total) || 0;
+            hit.remote_total = Number(r.row.remote_total) || 0;
+          } else {
+            // 后端取不到可靠进度（无状态目录且无成功历史，或源站不可达）：不猜数字，按无更新展示。
+            hit.new_count = 0;
+          }
+        }
+        renderLibraryGrid();
+        renderRecentList();
+      } catch (err) { alert(err); } finally { chkBtn.disabled = false; }
       return;
     }
     // 点击卡片任意处 → 打开预览（排除卡片内的按钮/链接，如下载、删除）

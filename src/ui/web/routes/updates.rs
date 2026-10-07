@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use crate::base_system::novel_updates;
@@ -74,7 +74,10 @@ pub(crate) fn boot_scan(state: &AppState) {
         thread::spawn(move || {
             if let Err(err) = scan_updates(&save_dir, 1, store.clone()) {
                 store.finish_failed(err.to_string());
+                return;
             }
+            // 冷启动串行扫完顺手修正一次陈旧行（不触网）并把内存快照落盘。
+            recompute_and_persist(&store, &save_dir);
         });
     }
 }
@@ -113,13 +116,18 @@ pub(crate) fn spawn_serializing_scheduler(state: AppState) {
                         store2.update_one(row_from_update(it));
                     }
                 }
+                // 特性1+2：本地已无状态目录的陈旧行在此修正（能兜底则重算、否则剔除），
+                // 并把修正后的内存快照落盘，避免重启后旧徽标复活。
+                recompute_and_persist(&store2, &dir);
             })
             .await;
         }
     });
 }
 
-/// 预览页"信息更新"联动：强制刷新单本远端章节数，回写缓存与内存快照，返回该书最新行。
+/// 单本查更新（预览页“信息更新”与下载库“查更新”共用）：强制刷新该书远端章节数，
+/// 回写逐本缓存与内存快照并落盘；本地无状态目录时后端用下载历史判定进度，
+/// 章节数比缓存增长则把该书重新纳入递增调度。
 #[derive(Debug, Deserialize)]
 pub(crate) struct RefreshOneQuery {
     pub(crate) book_id: String,
@@ -136,17 +144,25 @@ pub(crate) async fn api_updates_refresh_one(
         .clone();
     let save_dir = cfg.default_save_dir();
     let book_id = q.book_id.clone();
-    let res = tokio::task::spawn_blocking(move || novel_updates::refresh_one_remote(&save_dir, &book_id))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let scan_dir = save_dir.clone();
+    let res =
+        tokio::task::spawn_blocking(move || novel_updates::refresh_one_remote(&scan_dir, &book_id))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(|_| StatusCode::BAD_GATEWAY)?;
     match res {
         Some(row) => {
             let out = row_from_update(row);
             state.update_scan.update_one(out.clone());
+            // 单本刷新结果同步落盘，重启后不会回到旧章节数。
+            recompute_and_persist(&state.update_scan, &save_dir);
             Ok(Json(json!({ "ok": true, "row": out })))
         }
-        None => Ok(Json(json!({ "ok": false, "row": Value::Null }))),
+        None => {
+            // 进度无从取得（无状态目录且无成功历史）或远端不可达：不回写徽标，仅修正一次陈旧行。
+            recompute_and_persist(&state.update_scan, &save_dir);
+            Ok(Json(json!({ "ok": false, "row": Value::Null })))
+        }
     }
 }
 
@@ -185,4 +201,71 @@ fn row_from_update(it: novel_updates::NovelUpdateRow) -> UpdateScanRow {
         is_ignored: it.is_ignored,
         finished: it.finished,
     }
+}
+
+/// `UpdateScanRow` → `NovelUpdateRow`：folder 统一还原为绝对路径，
+/// 使落盘快照与后端扫描结果保持同一形态（前端只用目录名，不受影响）。
+fn row_to_novel(save_dir: &Path, it: UpdateScanRow) -> novel_updates::NovelUpdateRow {
+    let folder = {
+        let p = PathBuf::from(&it.folder);
+        if p.is_absolute() { p } else { save_dir.join(p) }
+    };
+    novel_updates::NovelUpdateRow {
+        book_id: it.book_id,
+        book_name: it.book_name,
+        folder,
+        local_total: it.local_total,
+        local_failed: it.local_failed,
+        remote_total: it.remote_total,
+        new_count: it.new_count,
+        has_update: it.has_update,
+        is_ignored: it.is_ignored,
+        finished: it.finished,
+    }
+}
+
+/// 陈旧行修正 + 快照落盘（不触网）。
+///
+/// 单本刷新与后台增量扫描以往只改内存/逐本缓存，磁盘快照停在最后一次全量扫描的结果，
+/// 服务重启就会把陈旧徽标再载回来；同时，“状态目录已被 auto_clear_dump 删除”的书
+/// 已永远脱离扫描集合，旧行无人重算。本函数每轮把这两件事一并处理。
+fn recompute_and_persist(store: &std::sync::Arc<UpdateScanStore>, save_dir: &Path) {
+    let snap = store.snapshot();
+    // 全量扫描进行中：由扫描自身的 finish + 落盘负责，不交叉覆盖。
+    if snap.running {
+        return;
+    }
+
+    let mut updates: Vec<novel_updates::NovelUpdateRow> = snap
+        .updates
+        .into_iter()
+        .map(|r| row_to_novel(save_dir, r))
+        .collect();
+    let mut no_updates: Vec<novel_updates::NovelUpdateRow> = snap
+        .no_updates
+        .into_iter()
+        .map(|r| row_to_novel(save_dir, r))
+        .collect();
+    let changed = novel_updates::recompute_or_prune_rows(save_dir, &mut updates, &mut no_updates);
+    if changed > 0 {
+        store.replace_rows(
+            updates.iter().cloned().map(row_from_update).collect(),
+            no_updates.iter().cloned().map(row_from_update).collect(),
+        );
+    }
+
+    let after = store.snapshot();
+    novel_updates::persist_update_snapshot(
+        save_dir,
+        after
+            .updates
+            .into_iter()
+            .map(|r| row_to_novel(save_dir, r))
+            .collect(),
+        after
+            .no_updates
+            .into_iter()
+            .map(|r| row_to_novel(save_dir, r))
+            .collect(),
+    );
 }
