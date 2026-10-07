@@ -108,12 +108,12 @@ fn main() -> Result<()> {
 
     // 番茄自签 sidecar 地址：config.yml 未入库（新机器默认为空）时用环境变量兜底，
     // 使容器/一键启动无需手工编辑 config.yml。兼容改名前的 TOMATO_* 变量。
-    if config.unidbg_signer_url.trim().is_empty() {
-        if let Some(v) = base_system::env_first(&["UNIDBG_SIGNER_URL", "TOMATO_SIGNER_URL"]) {
-            let v = v.trim().to_string();
-            if !v.is_empty() {
-                config.unidbg_signer_url = v;
-            }
+    if config.unidbg_signer_url.trim().is_empty()
+        && let Some(v) = base_system::env_first(&["UNIDBG_SIGNER_URL", "TOMATO_SIGNER_URL"])
+    {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            config.unidbg_signer_url = v;
         }
     }
 
