@@ -1,6 +1,6 @@
 [package]
 name = "unified-novel-downloader"
-version = "2.6.3"
+version = "2.6.4"
 edition = "2024"
 description = "Unified novel downloader supporting multiple providers (Fanqie, Shuqi, Qimao)"
 repository = "https://github.com/lehuaner/unified-novel-download"
