@@ -1135,12 +1135,47 @@ function renderLibraryGrid() {
   if (hint) hint.textContent = `已下载 ${libraryBooksCache.length} 本` + (active.length ? ` · 进行中 ${active.length}` : '');
 }
 
+// 轮询每 1.5s 触发一次库视图渲染；数据未变化时跳过重建 DOM，
+// 避免封面 <img> 被反复销毁重建导致的闪烁与重复加载。
+let libRenderSig = null;
+function libraryRenderSig() {
+  const parts = [];
+  for (const it of jobsList()) {
+    const p = it.progress || {};
+    parts.push([
+      'j', it.id, it.state || '', it.book_id || '', it.title || '',
+      it.updated_ms || 0, it.message || '',
+      p.saved_chapters || 0, p.chapter_total || 0,
+      (it.book_name_options || []).length, (it.format_options || []).length,
+      (it.meta && it.meta.cover_url) || '',
+    ].join('|'));
+  }
+  for (const b of libraryBooksCache) {
+    parts.push([
+      'b', b.book_id || '', b.stem || '', b.title || '', b.cover_url || '',
+      b.main_rel || '', b.main_is_dir ? 1 : 0, b.has_audio ? 1 : 0,
+      b.new_count || 0, b.local_total || 0, b.remote_total || 0, b.size || 0,
+    ].join('|'));
+  }
+  const filterEl = document.getElementById('libFilter');
+  parts.push('f|' + ((filterEl && filterEl.value) || ''));
+  return parts.join('\n');
+}
+
+// 库视图统一渲染入口（下载库网格 + 首页“最近下载”）：签名一致时跳过重建。
+function renderLibraryViews(force) {
+  const sig = libraryRenderSig();
+  if (!force && sig === libRenderSig) return;
+  libRenderSig = sig;
+  renderLibraryGrid();
+  renderRecentList();
+}
+
 // 拉取磁盘成品书并渲染（下载/删除/任务结束后调用）。
 async function refreshLibrary() {
   const data = await j('/api/library/books');
   libraryBooksCache = (data && data.books) || [];
-  renderLibraryGrid();
-  renderRecentList();
+  renderLibraryViews(true);
 }
 
 // ── Search ─────────────────────────────────────────────────────────
@@ -1366,7 +1401,7 @@ async function loadRecentDownloads() {
   const box = document.getElementById('recentDownloads');
   if (!box) return;
   if (!libraryBooksCache.length) { try { await refreshLibrary(); } catch { /* ignore */ } }
-  else renderRecentList();
+  else renderLibraryViews();
 }
 
 // 首页“最近下载”小列表：与下载库同一口径（同书不双卡，进行中卡标“更新中”）。
@@ -1862,8 +1897,7 @@ async function syncJobs(full) {
     )).then(() => refreshLibrary().catch(() => {})).catch(() => {});
   }
   jobsActiveCount = nowActive;
-  renderLibraryGrid();
-  renderRecentList();
+  renderLibraryViews();
   for (const it of list) {
     if ((it.state || '').toLowerCase() === 'failed' && it.message) maybeShowIidWarningFromError(it.message);
   }
@@ -2070,7 +2104,7 @@ function wire() {
   const libRefreshBtn = document.getElementById('libRefresh');
   if (libRefreshBtn) libRefreshBtn.addEventListener('click', () => { refreshLibrary().catch(() => {}); refreshUpdates(true).catch(() => {}); });
   const libFilterEl = document.getElementById('libFilter');
-  if (libFilterEl) libFilterEl.addEventListener('input', () => { renderLibraryGrid(); });
+  if (libFilterEl) libFilterEl.addEventListener('input', () => { renderLibraryViews(); });
 
   // 列数切换（全局，作用于所有 .book-grid）
   document.querySelectorAll('.colToggle').forEach(btn => btn.addEventListener('click', () => {
@@ -2192,8 +2226,7 @@ function wire() {
             hit.new_count = 0;
           }
         }
-        renderLibraryGrid();
-        renderRecentList();
+        renderLibraryViews();
       } catch (err) { alert(err); } finally { chkBtn.disabled = false; }
       return;
     }
@@ -2318,8 +2351,7 @@ function wire() {
           hit.new_count = 0;
         }
       }
-      renderLibraryGrid();
-      renderRecentList();
+      renderLibraryViews();
     } catch (_) { /* 单本刷新失败不影响预览本身 */ }
   });
 

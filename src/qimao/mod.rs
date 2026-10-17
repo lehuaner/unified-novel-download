@@ -757,7 +757,9 @@ pub fn search_items(
         let finished = pick_any_str(&b, &["is_over", "state", "finished"])
             .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
             .or_else(|| {
-                if sub_title.contains('完') && (sub_title.contains("完结") || sub_title.contains("完本")) {
+                if sub_title.contains('完')
+                    && (sub_title.contains("完结") || sub_title.contains("完本"))
+                {
                     Some(true)
                 } else if sub_title.contains("连载") {
                     Some(false)

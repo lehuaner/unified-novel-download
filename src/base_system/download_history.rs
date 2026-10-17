@@ -211,6 +211,14 @@ pub fn read_download_history_deduped(
     out
 }
 
+/// 该书是否存在“真实下载过”的历史记录（排除预览补档 archive 与 failed）。
+/// 用于预览清理等场景判断封面是否为已下载书的本地封面来源。
+pub fn has_real_download_record(book_id: &str) -> bool {
+    read_all_history_records()
+        .iter()
+        .any(|r| r.book_id == book_id && r.status != "failed" && r.status != "archive")
+}
+
 /// 补档：若该 book_id 尚无成功/存档记录，则写入一条元数据存档（status=archive）。
 /// 已有非失败记录时不覆盖（避免顶掉真实下载进度）；返回是否新写。
 pub fn archive_book_meta(book_id: &str, record: &DownloadHistoryRecord) -> bool {

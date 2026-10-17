@@ -335,6 +335,11 @@ pub(super) fn cleanup_preview_cover_artifacts(app: &mut App) {
         return;
     };
 
+    // 已真实下载过的书：预览补出的封面是下载库卡片的本地封面来源，不能删。
+    if crate::base_system::download_history::has_real_download_record(&pending.plan.book_id) {
+        return;
+    }
+
     // NOTE: preview currently downloads cover into the same book folder name as status folder.
     // Only delete when the folder contains *only* cover-like files and no status.json.
     let dir = crate::base_system::book_paths::book_folder_path(

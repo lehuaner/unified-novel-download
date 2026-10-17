@@ -419,8 +419,24 @@ impl BookManager {
 
     pub fn delete_status_folder(&mut self) -> std::io::Result<()> {
         if self.status_folder.exists() {
+            // auto_clear 会整目录删除（含封面），下载库卡片将退化为远程回退 URL。
+            // 删除前保留封面，删完后放回一个只含封面的目录（无 status.json，
+            // 库扫描/更新扫描都不会把它当作“已下载状态”）。
+            let preserved_cover =
+                book_paths::find_existing_cover_file(&self.status_folder, Some(&self.book_name))
+                    .and_then(|p| {
+                        let name = p.file_name()?.to_os_string();
+                        fs::read(&p).ok().map(|bytes| (name, bytes))
+                    });
             fs::remove_dir_all(&self.status_folder)?;
             self.config.mark_status_folder_removed(&self.status_folder);
+            if let Some((file_name, bytes)) = preserved_cover {
+                let restored = fs::create_dir_all(&self.status_folder).is_ok()
+                    && fs::write(self.status_folder.join(file_name), bytes).is_ok();
+                if !restored {
+                    let _ = fs::remove_dir_all(&self.status_folder);
+                }
+            }
         }
         Ok(())
     }
@@ -458,5 +474,53 @@ impl BookManager {
                 data
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BookManager;
+    use crate::base_system::context::Config;
+
+    #[test]
+    fn delete_status_folder_keeps_cover_but_drops_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.save_path = temp.path().display().to_string();
+        let mut manager = BookManager::new(config, "7047850786264449550", "测试书").unwrap();
+        manager.book_name = "测试书".to_string();
+
+        let folder = temp.path().join("7047850786264449550");
+        std::fs::write(folder.join("status.json"), "{}\n").unwrap();
+        std::fs::write(folder.join("cover.jpg"), b"cover-bytes").unwrap();
+
+        manager.delete_status_folder().unwrap();
+
+        assert!(folder.exists(), "封面目录应保留");
+        assert!(!folder.join("status.json").exists(), "状态文件应被删除");
+        assert_eq!(
+            std::fs::read(folder.join("cover.jpg")).unwrap(),
+            b"cover-bytes"
+        );
+    }
+
+    #[test]
+    fn delete_status_folder_preserves_legacy_named_cover() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.save_path = temp.path().display().to_string();
+        let mut manager = BookManager::new(config, "7047850786264449551", "旧版书名").unwrap();
+        manager.book_name = "旧版书名".to_string();
+
+        let folder = temp.path().join("7047850786264449551");
+        std::fs::write(folder.join("status.json"), "{}\n").unwrap();
+        std::fs::write(folder.join("旧版书名.jpg"), b"legacy-cover").unwrap();
+
+        manager.delete_status_folder().unwrap();
+
+        assert_eq!(
+            std::fs::read(folder.join("旧版书名.jpg")).unwrap(),
+            b"legacy-cover"
+        );
     }
 }

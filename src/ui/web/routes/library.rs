@@ -155,9 +155,10 @@ pub(crate) async fn api_library_books(
     let root = state.library_root.as_ref().clone();
     let limit = q.limit.unwrap_or(500).clamp(1, 2000);
     let name_kw = q.name.clone();
-    let mut books = tokio::task::spawn_blocking(move || build_books(&root, limit, name_kw.as_deref()))
-        .await
-        .unwrap_or_default();
+    let mut books =
+        tokio::task::spawn_blocking(move || build_books(&root, limit, name_kw.as_deref()))
+            .await
+            .unwrap_or_default();
 
     // #5：把可更新扫描快照并入书籍接口，前端一次取到，徽标不再依赖二次请求而延迟出现。
     let snap = state.update_scan.snapshot();
@@ -166,7 +167,11 @@ pub(crate) async fn api_library_books(
         umap.entry(row.book_id.clone()).or_insert(row);
     }
     for b in books.iter_mut() {
-        let bid = b.get("book_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let bid = b
+            .get("book_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if bid.is_empty() {
             continue;
         }
@@ -189,7 +194,14 @@ pub(crate) async fn api_library_cover(
     let book_id = q.book_id.clone();
     let found = tokio::task::spawn_blocking(move || {
         let dir = root.join(book_folder_name(&book_id, None));
-        find_existing_cover_file(&dir, None).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b)))
+        // 书名从下载历史里取（与 /api/library/books 的封面判定同源），兼容旧版“书名.jpg”命名；
+        // 无历史记录时退回只查 canonical cover.*。
+        let book_name = read_download_history_deduped(2000, None)
+            .into_iter()
+            .find(|r| r.book_id == book_id)
+            .map(|r| r.book_name);
+        find_existing_cover_file(&dir, book_name.as_deref())
+            .and_then(|p| std::fs::read(&p).ok().map(|b| (p, b)))
     })
     .await
     .ok()
@@ -272,14 +284,12 @@ fn build_books(root: &Path, limit: usize, name_kw: Option<&str>) -> Vec<Value> {
         }
         let author_hist = rec.map(|r| r.author.clone()).unwrap_or_default();
         // 下载历史缺元信息时（旧版未将简介/评分等写进历史），回读该书目录下的 status.json 兑底。
-        let status_meta = rec
-            .filter(|r| !r.book_id.trim().is_empty())
-            .and_then(|r| {
-                novel_updates::read_status_json(
-                    &root.join(book_folder_name(&r.book_id, None)),
-                    &r.book_id,
-                )
-            });
+        let status_meta = rec.filter(|r| !r.book_id.trim().is_empty()).and_then(|r| {
+            novel_updates::read_status_json(
+                &root.join(book_folder_name(&r.book_id, None)),
+                &r.book_id,
+            )
+        });
         let status_str = |key: &str| -> String {
             status_meta
                 .as_ref()
@@ -287,8 +297,11 @@ fn build_books(root: &Path, limit: usize, name_kw: Option<&str>) -> Vec<Value> {
                 .unwrap_or_default()
                 .to_string()
         };
-        let author =
-            if author_hist.trim().is_empty() { status_str("author") } else { author_hist };
+        let author = if author_hist.trim().is_empty() {
+            status_str("author")
+        } else {
+            author_hist
+        };
         // 封面优先用下载时已存到缓存目录(<book_id>/cover.*)的图片；
         // 其次回退下载历史里的 cover_url（归一化为公网 JPEG）。
         let mut cover_url = None;
@@ -306,8 +319,11 @@ fn build_books(root: &Path, limit: usize, name_kw: Option<&str>) -> Vec<Value> {
 
         // 预计算待回退字段（json! 宏不支持内联块表达式）。
         let category_hist = rec.map(|r| r.category.clone()).unwrap_or_default();
-        let category =
-            if category_hist.trim().is_empty() { status_str("category") } else { category_hist };
+        let category = if category_hist.trim().is_empty() {
+            status_str("category")
+        } else {
+            category_hist
+        };
         let description_hist = rec.map(|r| r.description.clone()).unwrap_or_default();
         let description = if description_hist.trim().is_empty() {
             status_str("description")

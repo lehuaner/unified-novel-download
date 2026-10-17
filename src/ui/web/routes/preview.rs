@@ -445,6 +445,13 @@ pub(crate) async fn api_preview_cleanup(
         return StatusCode::NO_CONTENT;
     }
 
+    // 已真实下载过的书：预览补出的封面是下载库卡片的本地封面来源，
+    // 删掉后卡片会退化为远程回退 URL（失效即空白+闪烁）。archive/failed 不算真实下载。
+    if crate::base_system::download_history::has_real_download_record(&book_id) {
+        debug!(book_id = %book_id, "cleanup: 该书已有真实下载记录，保留预览补出的封面");
+        return StatusCode::NO_CONTENT;
+    }
+
     // 需要获取 book_name 以定位文件夹，调用 prepare_download_plan 一次
     let cfg_for_plan = cfg.clone();
     let bid = book_id.clone();
