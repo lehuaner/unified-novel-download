@@ -39,6 +39,22 @@ const HOST_ABI: &str = "arm64-v8a";
 const USER_AGENT: &str = "com.dragon.read.oversea.gp/68132 (Linux; U; Android 10; zh_CN; OnePlus11; Build/V291IR;tt-ok/3.12.13.4-tiktok)";
 const COOKIE: &str = "store-region=cn-zj; store-region-src=did; install_id=933935730456617";
 
+// ── 搜索端设备指纹（与 sidecar unidbg FQApiProperties 默认值一致）──────────────
+// 服务端对搜索接口的旧 OnePlus11 静态指纹已静默拒绝（HTTP 200 + 空 body，
+// 导致 “search/tab parse JSON failed” 并退化到慢速 sidecar 回退）。
+// 仅搜索请求覆盖为该组指纹；内容/注册密钥链路继续沿用上面的旧指纹，避免影响下载。
+const SEARCH_INSTALL_ID: &str = "3014230545809161";
+const SEARCH_DEVICE_ID: &str = "3014230545805065";
+const SEARCH_CDID: &str = "b1a0111f-ad5b-44b8-83f7-fa850390600c";
+const SEARCH_DEVICE_TYPE: &str = "X90";
+const SEARCH_DEVICE_BRAND: &str = "vivo";
+const SEARCH_ROM_VERSION: &str = "V433IR+release-keys";
+const SEARCH_RESOLUTION: &str = "2560*1440";
+const SEARCH_DPI: &str = "560";
+const SEARCH_HOST_ABI: &str = "armeabi-v7a";
+const SEARCH_OS_API: &str = "33";
+const SEARCH_OS_VERSION: &str = "13";
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -92,6 +108,27 @@ fn build_common_params() -> Vec<(String, String)> {
         ("rom_version".into(), ROM_VERSION.into()),
         ("cdid".into(), CDID.into()),
     ]
+}
+
+/// 把搜索请求的公共参数中的设备指纹覆盖为 sidecar 兼容指纹。
+fn apply_search_fingerprint(params: &mut [(String, String)]) {
+    for (k, v) in params.iter_mut() {
+        let new = match k.as_str() {
+            "iid" => SEARCH_INSTALL_ID,
+            "device_id" => SEARCH_DEVICE_ID,
+            "device_type" => SEARCH_DEVICE_TYPE,
+            "device_brand" => SEARCH_DEVICE_BRAND,
+            "os_api" => SEARCH_OS_API,
+            "os_version" => SEARCH_OS_VERSION,
+            "rom_version" => SEARCH_ROM_VERSION,
+            "resolution" => SEARCH_RESOLUTION,
+            "dpi" => SEARCH_DPI,
+            "host_abi" => SEARCH_HOST_ABI,
+            "cdid" => SEARCH_CDID,
+            _ => continue,
+        };
+        *v = new.to_string();
+    }
 }
 
 /// 构建通用请求头。
@@ -421,6 +458,7 @@ impl FqApiClient {
         let tt = if tab_type == 0 { 1 } else { tab_type };
         let url = format!("{API_BASE}/reading/bookapi/search/tab/v");
         let mut params = build_common_params();
+        apply_search_fingerprint(&mut params);
         params.extend([
             ("query".into(), url_encode(kw)),
             ("tab_name".into(), url_encode(tab_name(tt))),
@@ -845,5 +883,36 @@ fn json_i64(v: Option<&Value>) -> Option<i64> {
         Value::Number(n) => n.as_i64(),
         Value::String(s) => s.trim().parse::<i64>().ok(),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_fingerprint_override_replaces_device_params() {
+        let mut params = build_common_params();
+        apply_search_fingerprint(&mut params);
+        let get = |key: &str| {
+            params
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(get("iid"), Some(SEARCH_INSTALL_ID));
+        assert_eq!(get("device_id"), Some(SEARCH_DEVICE_ID));
+        assert_eq!(get("device_type"), Some(SEARCH_DEVICE_TYPE));
+        assert_eq!(get("device_brand"), Some(SEARCH_DEVICE_BRAND));
+        assert_eq!(get("os_api"), Some(SEARCH_OS_API));
+        assert_eq!(get("os_version"), Some(SEARCH_OS_VERSION));
+        assert_eq!(get("rom_version"), Some(SEARCH_ROM_VERSION));
+        assert_eq!(get("resolution"), Some(SEARCH_RESOLUTION));
+        assert_eq!(get("dpi"), Some(SEARCH_DPI));
+        assert_eq!(get("host_abi"), Some(SEARCH_HOST_ABI));
+        assert_eq!(get("cdid"), Some(SEARCH_CDID));
+        // 非指纹参数保持不变
+        assert_eq!(get("aid"), Some(AID));
+        assert_eq!(get("app_name"), Some("novelapp"));
     }
 }
