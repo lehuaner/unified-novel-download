@@ -117,6 +117,7 @@ impl BookManager {
                     self.book_name = book_name.to_string();
                 }
                 info!(target: "book_manager", "loaded resume journal only: chapters={}", self.downloaded.len());
+                self.purge_stale_chapters();
                 return true;
             }
             return false;
@@ -249,6 +250,7 @@ impl BookManager {
         let _ = self.merge_resume_journal();
 
         info!(target: "book_manager", "loaded resume state: chapters={}", self.downloaded.len());
+        self.purge_stale_chapters();
         true
     }
 
@@ -362,6 +364,51 @@ impl BookManager {
 
     fn resume_journal_path(&self) -> PathBuf {
         self.status_folder.join(RESUME_JOURNAL_FILE)
+    }
+
+    /// 旧版正文清洗规则遗留的站点推广语特征。命中说明该章是脏缓存，需要重新下载。
+    fn stale_content_marker(content: &str) -> bool {
+        content.contains("请记住本书首发域名")
+            || content.contains("东滩小说手机版阅读网址")
+            || content.contains("www.dongtanxs.com")
+            || content.contains("东滩小说小说推荐阅读")
+    }
+
+    /// 清理旧版清洗规则缓存下来的脏章节（同步重写 `status.json` 与追加日志），
+    /// 返回被清理的章节数。调用方应在 `load_existing_status` 之后执行。
+    pub fn purge_stale_chapters(&mut self) -> usize {
+        let before = self.downloaded.len();
+        self.downloaded.retain(|_, (_, content)| {
+            content
+                .as_deref()
+                .is_none_or(|c| !Self::stale_content_marker(c))
+        });
+        let removed = before.saturating_sub(self.downloaded.len());
+        if removed == 0 {
+            return 0;
+        }
+        self.save_download_status();
+        self.rewrite_resume_journal_without_stale();
+        info!(target: "book_manager", removed, "已清理旧缓存中的站点广告章节");
+        removed
+    }
+
+    fn rewrite_resume_journal_without_stale(&self) {
+        let path = self.resume_journal_path();
+        let Ok(raw) = fs::read_to_string(&path) else {
+            return;
+        };
+        let mut out = String::with_capacity(raw.len());
+        for line in raw.lines() {
+            let keep = serde_json::from_str::<ResumeJournalRecord>(line)
+                .map(|r| !Self::stale_content_marker(&r.content))
+                .unwrap_or(true);
+            if keep {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        let _ = fs::write(&path, out);
     }
 
     /// 合并追加日志中的章节内容到 `downloaded`。返回是否成功加载到至少 1 条记录。
@@ -522,5 +569,38 @@ mod tests {
             std::fs::read(folder.join("旧版书名.jpg")).unwrap(),
             b"legacy-cover"
         );
+    }
+
+    #[test]
+    fn purge_stale_chapters_drops_ad_content_and_rewrites_journal() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.save_path = temp.path().display().to_string();
+        let mut manager = BookManager::new(config, "dt:1", "测试书").unwrap();
+        manager.book_name = "测试书".to_string();
+
+        manager.save_chapter("1", "第一章", "正常正文");
+        manager.append_downloaded_chapter("1", "第一章", "正常正文");
+        manager.save_chapter(
+            "2",
+            "第二章",
+            "正文……http://www.dongtanxs.com/dongtan1/2.html 请记住本书首发域名：www.dongtanxs.com",
+        );
+        manager.append_downloaded_chapter(
+            "2",
+            "第二章",
+            "正文……请记住本书首发域名：www.dongtanxs.com",
+        );
+        manager.save_download_status();
+
+        assert_eq!(manager.purge_stale_chapters(), 1);
+        assert!(manager.downloaded.contains_key("1"));
+        assert!(!manager.downloaded.contains_key("2"));
+
+        let journal =
+            std::fs::read_to_string(manager.book_folder().join("downloaded_chapters.jsonl"))
+                .unwrap();
+        assert!(journal.contains("正常正文"));
+        assert!(!journal.contains("请记住本书首发域名"));
     }
 }

@@ -226,7 +226,7 @@ pub(crate) async fn api_library_cover(
             }
             resp.headers_mut().insert(
                 header::CACHE_CONTROL,
-                HeaderValue::from_static("public, max-age=86400"),
+                HeaderValue::from_static("public, max-age=0, must-revalidate"),
             );
             resp
         }
@@ -308,8 +308,15 @@ fn build_books(root: &Path, limit: usize, name_kw: Option<&str>) -> Vec<Value> {
         if let Some(r) = rec {
             if !r.book_id.trim().is_empty() {
                 let dir = root.join(book_folder_name(&r.book_id, None));
-                if find_existing_cover_file(&dir, Some(&r.book_name)).is_some() {
-                    cover_url = Some(format!("/api/library/cover?book_id={}", r.book_id));
+                if let Some(p) = find_existing_cover_file(&dir, Some(&r.book_name)) {
+                    // 带文件修改时间：封面被官网封面替换后 URL 变化，避免浏览器继续用旧缓存。
+                    let v = std::fs::metadata(&p)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis())
+                        .unwrap_or(0);
+                    cover_url = Some(format!("/api/library/cover?book_id={}&v={}", r.book_id, v));
                 }
             }
             if cover_url.is_none() && !r.cover_url.trim().is_empty() {

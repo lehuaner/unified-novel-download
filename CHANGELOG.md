@@ -3,6 +3,13 @@
 本文件记录 Unified Novel Downloader 的用户可见变更。
 发布流程：推送 `v*` tag 后由 GitHub Actions（`.github/workflows/build-rust.yml`）自动构建多平台产物并创建 Release。
 
+## v2.7.3 — 2026-11-06
+
+### 修复
+
+- **旧缓存章节的广告不会自动消失**：断点续传会复用 `downloaded_chapters.jsonl` 里的历史正文，v2.7.2 只修了解析规则，已缓存章节仍是脏内容。现在加载缓存时检测站点推广语（「请记住本书首发域名」/「东滩小说手机版阅读网址」/本站链接），命中即删除并重写 `status.json` 与追加日志，重新下载时自动补齐。
+- **下载库封面仍显示旧图**：`/api/library/cover` 之前返回 `max-age=86400`，浏览器会缓存 24 小时。现改为 `max-age=0, must-revalidate`，并在封面 URL 追加文件修改时间参数，官网封面替换后立即刷新。
+
 ## v2.7.2 — 2026-11-06
 
 ### 修复
