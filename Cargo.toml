@@ -1,6 +1,6 @@
 [package]
 name = "unified-novel-downloader"
-version = "2.7.1"
+version = "2.7.2"
 edition = "2024"
 description = "Unified novel downloader supporting multiple providers (Fanqie, Shuqi, Qimao, Zishiba, Hen0, Guanshuya, Biqubee, Biquga, Dongtan)"
 repository = "https://github.com/lehuaner/unified-novel-download"
@@ -125,6 +125,7 @@ debug = false
 panic = "unwind"
 strip = "symbols"
 incremental = false
+
 
 
 

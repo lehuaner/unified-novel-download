@@ -48,6 +48,43 @@ pub fn paid_platform(id: &str) -> Option<&'static PaidPlatformDef> {
     PAID_PLATFORMS.iter().find(|p| p.id == id)
 }
 
+/// 为聚合池中的资源站书补全官方元数据（按书名 + 作者匹配）。
+///
+/// 非池成员、官方源未启用或未达到匹配阈值时返回 `None`，调用方应保留资源站数据。
+pub fn official_meta_for_pool_book(
+    book_id: &str,
+    book_name: &str,
+    author: &str,
+    timeout_secs: u64,
+) -> Option<OfficialBook> {
+    let name = book_name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let owner = provider::owner_of(book_id)?;
+    let def = PAID_PLATFORMS.iter().find(|d| {
+        pool::find(d.pool_id).is_some_and(|p| p.members.iter().any(|m| *m == owner.id()))
+    })?;
+    let src = official::find(def.official_source)?;
+    let timeout = timeout_secs.max(3);
+    let (books, _) = src.search(name, 1, timeout).ok()?;
+    if books.is_empty() {
+        return None;
+    }
+    let best = classifier::best_match(name, author.trim(), "", &books)?;
+    if !classifier::accepted(best.score, best.author_eq, &MatchConfig::default()) {
+        return None;
+    }
+    let mut hit = books.get(best.index)?.clone();
+    // 搜索列表的简介可能被截断，补一次详情；失败则保留列表数据。
+    if hit.intro_full.as_deref().unwrap_or("").trim().is_empty()
+        && let Ok(detail) = src.fetch_detail(&hit.official_id, timeout)
+    {
+        hit = detail;
+    }
+    Some(hit)
+}
+
 /// 聚合搜索结果。
 pub struct Outcome {
     /// 已标注 `display_platform` / `_provider` 的条目。

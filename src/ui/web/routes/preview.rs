@@ -228,7 +228,7 @@ pub(crate) async fn api_preview(
     .ok()
     .flatten();
 
-    let (resolved_book_id, meta, chapter_count) = if let Some(m) = summary {
+    let (resolved_book_id, mut meta, chapter_count) = if let Some(m) = summary {
         let count = m.chapter_count.unwrap_or(0);
         (book_id.clone(), m, count)
     } else {
@@ -240,6 +240,21 @@ pub(crate) async fn api_preview(
         .map_err(|err| api_error(StatusCode::BAD_GATEWAY, format!("加载目录失败: {err}")))?;
         (plan.book_id.clone(), plan.meta.clone(), plan.chapters.len())
     };
+
+    // 聚合池资源站：卡片字段与封面统一改用官网数据。
+    // 官方源走阻塞 HTTP（内部自建 runtime），必须放到 blocking 线程，不能在 async 上下文直接调用。
+    let cfg_for_enrich = cfg.clone();
+    let id_for_enrich = resolved_book_id.clone();
+    meta = tokio::task::spawn_blocking(move || {
+        crate::download::plan::enrich_meta_with_official(
+            &cfg_for_enrich,
+            &id_for_enrich,
+            &mut meta,
+        );
+        meta
+    })
+    .await
+    .unwrap_or_default();
 
     // 番茄网页详情页不存在（404）或抓取失败时，get_book_info 会静默返回全 None，
     // 而目录/章节走另一条通道仍成功。此时必须如实标注，不能让 UI 拿空值渲染“未知书名”。
@@ -352,7 +367,7 @@ pub(crate) async fn api_preview_archive(
     .ok()
     .flatten();
 
-    let (resolved_id, meta, chapter_count) = if let Some(m) = summary {
+    let (resolved_id, mut meta, chapter_count) = if let Some(m) = summary {
         let count = m.chapter_count.unwrap_or(0);
         (book_id.clone(), m, count)
     } else {
@@ -366,6 +381,21 @@ pub(crate) async fn api_preview_archive(
         .map_err(|err| api_error(StatusCode::BAD_GATEWAY, format!("补档失败: {err}")))?;
         (plan.book_id.clone(), plan.meta.clone(), plan.chapters.len())
     };
+
+    // 聚合池资源站：补档记录的卡片字段与封面统一改用官网数据。
+    // 官方源走阻塞 HTTP，必须放到 blocking 线程。
+    let cfg_for_enrich = cfg.clone();
+    let id_for_enrich = resolved_id.clone();
+    meta = tokio::task::spawn_blocking(move || {
+        crate::download::plan::enrich_meta_with_official(
+            &cfg_for_enrich,
+            &id_for_enrich,
+            &mut meta,
+        );
+        meta
+    })
+    .await
+    .unwrap_or_default();
 
     let book_name = meta
         .book_name

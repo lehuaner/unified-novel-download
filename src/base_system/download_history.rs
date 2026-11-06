@@ -79,10 +79,14 @@ impl DownloadHistoryRecord {
         let timestamp = OffsetDateTime::now_utc()
             .format(&Rfc3339)
             .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
-        let progress = format!(
-            "成功 {}/{} 章，失败 {} 章",
-            success_chapters, selected_chapters, failed_chapters
-        );
+        let progress = if status == "archive" {
+            format!("仅元数据（共 {} 章，未下载）", selected_chapters)
+        } else {
+            format!(
+                "成功 {}/{} 章，失败 {} 章",
+                success_chapters, selected_chapters, failed_chapters
+            )
+        };
 
         Self {
             timestamp,

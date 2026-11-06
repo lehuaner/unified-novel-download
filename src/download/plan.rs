@@ -25,6 +25,122 @@ pub fn prepare_download_plan(
     book_id: &str,
     meta_hint: BookMeta,
 ) -> Result<DownloadPlan> {
+    let mut plan = prepare_plan_raw(config, book_id, meta_hint)?;
+    let plan_book_id = plan.book_id.clone();
+    enrich_meta_with_official(config, &plan_book_id, &mut plan.meta);
+    Ok(plan)
+}
+
+/// 用官方源元数据覆盖聚合池资源站的书名/作者/简介/分类/评分/字数/状态/封面。
+///
+/// 仅对共享池中的资源站生效；未匹配到官方数据时保持资源站原值。
+pub(crate) fn enrich_meta_with_official(config: &Config, book_id: &str, meta: &mut BookMeta) {
+    let name = meta.book_name.as_deref().unwrap_or("").trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+    let author = meta.author.as_deref().unwrap_or("").trim().to_string();
+    let timeout = config.request_timeout.max(5);
+    let Some(off) = crate::aggregate::official_meta_for_pool_book(book_id, &name, &author, timeout)
+    else {
+        return;
+    };
+
+    if !off.title.trim().is_empty() {
+        meta.book_name = Some(off.title.clone());
+    }
+    if !off.author.trim().is_empty() {
+        meta.author = Some(off.author.clone());
+    }
+    let intro = off
+        .intro_full
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            let s = off.intro_short.trim();
+            (!s.is_empty()).then(|| s.to_string())
+        });
+    if intro.is_some() {
+        meta.description = intro;
+    }
+    if off.category.is_some() {
+        meta.category = off.category.clone();
+    }
+    if let Some(tags) = off.tags.as_deref() {
+        let parsed: Vec<String> = tags
+            .split(['，', ',', '、', ' '])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        if !parsed.is_empty() {
+            meta.tags = parsed;
+        }
+    }
+    if let Some(wc) = off.word_count {
+        meta.word_count = Some(wc as usize);
+    }
+    if let Some(finished) = off.finished {
+        meta.finished = Some(finished);
+    }
+    if let Some(score) = off.score {
+        meta.score = Some(score as f32);
+    }
+    if let Some(url) = off.cover_url.as_deref().filter(|s| !s.trim().is_empty()) {
+        meta.cover_url = Some(url.to_string());
+        meta.detail_cover_url = None;
+        save_official_cover(config, book_id, url, meta.book_name.as_deref());
+    }
+    info!(
+        target: "download",
+        book_id,
+        title = %meta.book_name.as_deref().unwrap_or(""),
+        "已使用晋江官网元数据"
+    );
+}
+
+/// 下载官方封面并写入 `cover.*`，同时删除其他扩展名的旧封面。
+fn save_official_cover(config: &Config, book_id: &str, url: &str, book_name: Option<&str>) {
+    let dir = book_paths::book_folder_path(config, book_id, book_name);
+    let _ = std::fs::create_dir_all(&dir);
+    let Some(bytes) = crate::third_party::media_fetch::fetch_bytes(url, Duration::from_secs(15))
+    else {
+        warn!(target: "download", book_id, "官方封面下载失败: {url}");
+        return;
+    };
+    if bytes.is_empty() {
+        return;
+    }
+    if bytes.len() >= 12 && &bytes[4..8] == b"ftyp" {
+        warn!(target: "download", book_id, "官方封面为 HEIC 格式，跳过");
+        return;
+    }
+    let (save_bytes, ext) =
+        if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            match crate::book_parser::image_utils::try_convert_to_jpeg(&bytes, 85, 0) {
+                Some(jpeg) => (jpeg, "jpg"),
+                None => (bytes, "webp"),
+            }
+        } else if bytes.len() >= 8 && bytes[0] == 0x89 && &bytes[1..4] == b"PNG" {
+            (bytes, "png")
+        } else {
+            (bytes, "jpg")
+        };
+    let path = book_paths::canonical_cover_path(&dir, ext);
+    if std::fs::write(&path, &save_bytes).is_ok() {
+        for other in book_paths::COVER_IMAGE_EXTENSIONS {
+            if other != ext {
+                let old = book_paths::canonical_cover_path(&dir, other);
+                if old.exists() {
+                    let _ = std::fs::remove_file(old);
+                }
+            }
+        }
+        info!(target: "download", book_id, path = %path.display(), "官方封面已保存");
+    }
+}
+
+fn prepare_plan_raw(config: &Config, book_id: &str, meta_hint: BookMeta) -> Result<DownloadPlan> {
     info!(target: "download", book_id, "准备下载计划（no-official）");
 
     // 外部源路由：按注册表顺序（书旗 → 七猫 → 姿势吧 → 笔下文学）识别前缀。

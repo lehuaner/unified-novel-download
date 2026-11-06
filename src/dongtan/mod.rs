@@ -509,10 +509,22 @@ fn parse_chapter_page(html: &str) -> Option<(String, String)> {
 }
 
 fn is_noise_line(s: &str) -> bool {
-    s.contains("东滩小说小说推荐阅读")
-        || s.contains("请收藏本站")
-        || s == "东滩小说"
-        || s.contains("（本章完）")
+    let t = s.trim();
+    t.contains("东滩小说小说推荐阅读")
+        || t.contains("请收藏本站")
+        || t.contains("请记住本书首发域名")
+        || t.contains("东滩小说手机版阅读网址")
+        || t == "东滩小说"
+        || t.contains("（本章完）")
+        || is_site_ad_url(t)
+}
+
+/// 正文中夹杂的纯本站链接行（如 `http://www.dongtanxs.com/dongtan94325/44941068.html`）。
+fn is_site_ad_url(s: &str) -> bool {
+    let lower = s.to_ascii_lowercase();
+    (lower.starts_with("http://") || lower.starts_with("https://"))
+        && lower.contains("dongtanxs.com")
+        && !s.chars().any(char::is_whitespace)
 }
 
 // ── 下载计划 ──────────────────────────────────────────────────
@@ -875,6 +887,9 @@ mod tests {
         assert!(body.contains("红衣少女坐在妆台前"));
         assert!(!body.contains("<script"));
         assert!(!body.contains("东滩小说小说推荐阅读"));
+        assert!(!body.contains("请记住本书首发域名"));
+        assert!(!body.contains("东滩小说手机版阅读网址"));
+        assert!(!body.contains("http://www.dongtanxs.com/dongtan"));
     }
 
     /// 实网基准：同一本书 50 章，串行 vs 4 线程。用于量化下载吞吐。
