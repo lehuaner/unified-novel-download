@@ -57,11 +57,11 @@ Invoke-Step "Default feature clippy" {
 
 if (-not $SkipCross) {
     Invoke-Step "Cross-target feature tests (musl/android set)" {
-        cargo test --no-default-features --features shuqi,qimao,tts-native,clipboard
+        cargo test --no-default-features --features full-sources,tts-native,clipboard
     }
 
     Invoke-Step "Cross-target clippy (musl/android set)" {
-        cargo clippy --no-default-features --features shuqi,qimao,tts-native,clipboard --all-targets -- -D warnings
+        cargo clippy --no-default-features --features full-sources,tts-native,clipboard --all-targets -- -D warnings
     }
 }
 
@@ -72,3 +72,4 @@ if (-not $SkipTree) {
 }
 
 Write-Host "`nAll requested maintenance checks completed." -ForegroundColor Green
+

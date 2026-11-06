@@ -53,10 +53,10 @@ cargo clippy --all-targets -- -D warnings
 
 if [[ "$skip_cross" -eq 0 ]]; then
   step "Cross-target feature tests (musl/android set)"
-  cargo test --no-default-features --features shuqi,qimao,tts-native,clipboard
+  cargo test --no-default-features --features full-sources,tts-native,clipboard
 
   step "Cross-target clippy (musl/android set)"
-  cargo clippy --no-default-features --features shuqi,qimao,tts-native,clipboard --all-targets -- -D warnings
+  cargo clippy --no-default-features --features full-sources,tts-native,clipboard --all-targets -- -D warnings
 fi
 
 if [[ "$skip_tree" -eq 0 ]]; then
@@ -65,3 +65,4 @@ if [[ "$skip_tree" -eq 0 ]]; then
 fi
 
 printf '\nAll requested maintenance checks completed.\n'
+

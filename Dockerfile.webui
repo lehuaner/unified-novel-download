@@ -15,7 +15,7 @@ WORKDIR /workspace/Unified-Novel-Downloader
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --no-default-features --features shuqi,qimao,tts,docker
+    cargo build --release --no-default-features --features full-sources,tts,docker
 
 # ── 番茄签名 sidecar（Spring Boot + unidbg，含内嵌 .so）──
 FROM maven:3.9-eclipse-temurin-17 AS sidecar
@@ -56,3 +56,5 @@ ENV SIDECAR_JVM_OPTS="-Xms64m -Xmx512m"
 EXPOSE 18423
 
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+

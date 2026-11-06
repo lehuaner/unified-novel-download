@@ -3,6 +3,15 @@
 本文件记录 Unified Novel Downloader 的用户可见变更。
 发布流程：推送 `v*` tag 后由 GitHub Actions（`.github/workflows/build-rust.yml`）自动构建多平台产物并创建 Release。
 
+## v2.7.1 — 2026-11-06
+
+修复 v2.7.0 发布产物缺失书源的问题。
+
+### 修复
+
+- **Android / Linux musl / macOS amd64 产物缺少全部新增书源与晋江聚合**：CI 在这些平台使用 `--no-default-features`，feature 列表仍是旧的 `shuqi,qimao`，导致产物只有番茄/书旗/七猫，晋江搜索结果恒为 0（本地默认构建正常，故未被测试发现）。
+- 新增 `full-sources` 聚合 feature（`shuqi,qimao,zishiba,hen0,guanshuya,biqubee,biquga,dongtan,jjwxc`），`default`、CI、Dockerfile 与维护脚本统一引用，后续新增书源只需改这一处，避免再次漏编。
+
 ## v2.7.0 — 2026-11-06
 
 从 v2.6.6（仅番茄/书旗/七猫）升级为多源聚合下载器。
@@ -93,3 +102,4 @@
 - `cargo fmt --all -- --check`：通过。
 - 三个新源实网 e2e：搜索 → 详情 → 目录 → 正文 → 真实下载全部通过。
 - 封面接口实网：`/api/book-cover`、`/api/official-cover` 均返回 `image/jpeg`。
+

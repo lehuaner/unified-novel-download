@@ -1,6 +1,6 @@
 [package]
 name = "unified-novel-downloader"
-version = "2.7.0"
+version = "2.7.1"
 edition = "2024"
 description = "Unified novel downloader supporting multiple providers (Fanqie, Shuqi, Qimao, Zishiba, Hen0, Guanshuya, Biqubee, Biquga, Dongtan)"
 repository = "https://github.com/lehuaner/unified-novel-download"
@@ -8,10 +8,13 @@ authors = ["lehuaner"]
 license = "MIT"
 
 [features]
-# 默认构建：包含全部小说源（番茄 / 书旗 / 七猫 / 姿势吧 / 笔下文学 / 官术网）+ TTS + 桌面剪贴板。
+# 默认构建：包含全部小说源 + TTS + 桌面剪贴板。
 # 重要：shuqi / qimao / zishiba / hen0 / guanshuya 必须在默认组合里，否则本地 `cargo test / clippy` 根本不会编译
 # 这些源的代码路径，而 CI 与 Release 产物都是带它们的（曾因此漏掉编译错误）。
-default = ["tts", "clipboard", "clipboard-arboard", "shuqi", "qimao", "zishiba", "hen0", "guanshuya", "biqubee", "biquga", "dongtan", "jjwxc"]
+default = ["full-sources", "tts", "clipboard", "clipboard-arboard"]
+
+# 全部书源（番茄由 core 常量提供，其余在此聚合）。发布产物统一使用该 feature，避免新增源时漏编。
+full-sources = ["shuqi", "qimao", "zishiba", "hen0", "guanshuya", "biqubee", "biquga", "dongtan", "jjwxc"]
 
 # 有声书（TTS）：默认启用；在 musl/android 等环境可关闭以避免 OpenSSL/curl 等原生依赖。
 tts = ["dep:msedge-tts"]
@@ -122,4 +125,7 @@ debug = false
 panic = "unwind"
 strip = "symbols"
 incremental = false
+
+
+
 
