@@ -29,6 +29,13 @@ pub(crate) fn build_router(state: AppState) -> Router {
             "/assets/qmnovel.webp",
             get(routes::index::asset_icon_qmnovel),
         )
+        .route(
+            "/assets/zsnovel.svg",
+            get(routes::index::asset_icon_zsnovel),
+        )
+        .route("/assets/hen0.svg", get(routes::index::asset_icon_hen0))
+        .route("/assets/jjwxc.png", get(routes::index::asset_icon_jjwxc))
+        .route("/assets/other.png", get(routes::index::asset_icon_other))
         .route("/api/login", post(routes::auth::api_login))
         .route(
             "/api/self_update",
@@ -66,6 +73,11 @@ pub(crate) fn build_router(state: AppState) -> Router {
         .route(
             "/api/search-cover",
             get(routes::search_cover::api_search_cover),
+        )
+        .route("/api/book-cover", get(routes::search_cover::api_book_cover))
+        .route(
+            "/api/official-cover",
+            get(routes::search_cover::api_official_cover),
         )
         .route(
             "/api/search-history",

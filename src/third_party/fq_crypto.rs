@@ -25,7 +25,8 @@ fn pkcs7_unpad(data: &[u8]) -> Result<Vec<u8>> {
     if data.is_empty() {
         return Err(anyhow!("pkcs7: empty data"));
     }
-    let pad = *data.last().unwrap() as usize;
+    // 上方已确保 data 非空，last() 必为 Some。
+    let pad = *data.last().expect("data checked non-empty above") as usize;
     if pad == 0 || pad > 16 || pad > data.len() {
         return Err(anyhow!("pkcs7: invalid padding {pad}"));
     }
@@ -69,7 +70,8 @@ pub(crate) fn aes_cbc_decrypt(data: &[u8], key_hex: &str) -> Result<Vec<u8>> {
     let cipher_key = aes::cipher::generic_array::GenericArray::from_slice(&key_bytes);
     let aes = Aes128::new(cipher_key);
 
-    let mut prev_block: [u8; 16] = iv.try_into().unwrap();
+    // 上方 `data.len() < 16` 校验 + split_at(16) 保证 iv 恰为 16 字节，try_into 必成功。
+    let mut prev_block: [u8; 16] = iv.try_into().expect("iv is exactly 16 bytes");
     let mut plaintext = Vec::with_capacity(cipher.len());
 
     for chunk in cipher.chunks(16) {

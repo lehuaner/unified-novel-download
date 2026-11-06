@@ -4,10 +4,16 @@ pub(crate) const APP_CSS: &str = include_str!("templates/app.css");
 pub(crate) const APP_FAVICON_ICO: &[u8] = include_bytes!("../../../img/app.ico");
 
 // 各搜索源图标（用于结果/下载库卡片右上角的来源标志）。
-// 文件名按真实字节类型命名：fqnovel.webp / qmnovel.webp 为 WEBP，sqnovel.png 为 PNG（Content-Type 见 routes/index.rs）。
+// 文件名按真实字节类型命名：fqnovel.webp / qmnovel.webp 为 WEBP，sqnovel.png 为 PNG，
+// zsnovel.svg / hen0.svg 为 SVG（Content-Type 见 routes/index.rs）。
 pub(crate) const ICON_FQNOVEL: &[u8] = include_bytes!("../../../img/fqnovel.webp");
 pub(crate) const ICON_SQNOVEL: &[u8] = include_bytes!("../../../img/sqnovel.png");
 pub(crate) const ICON_QMNOVEL: &[u8] = include_bytes!("../../../img/qmnovel.webp");
+pub(crate) const ICON_ZSNOVEL: &[u8] = include_bytes!("../../../img/zsnovel.svg");
+pub(crate) const ICON_HEN0: &[u8] = include_bytes!("../../../img/hen0.svg");
+// 晋江：官方 Logo 裁切主体后的图标；其他：资源站中无法归类的条目。
+pub(crate) const ICON_JJWXC: &[u8] = include_bytes!("../../../img/jjwxc.png");
+pub(crate) const ICON_OTHER: &[u8] = include_bytes!("../../../img/other.png");
 
 /// 底部横条的免费声明文案（外层 `<footer class="notice-bar">` 由 index.html 提供，
 /// 桌面与移动端都固定在页面最底部）。“开源仓库”前内联 GitHub octicon（16x16）。

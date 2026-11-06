@@ -15,38 +15,15 @@ use serde_json::Value;
 use crate::base_system::book_paths::book_folder_name;
 use crate::base_system::download_history;
 use crate::network_parser::network::{FanqieWebConfig, FanqieWebNetwork};
-#[cfg(feature = "qimao")]
-use crate::qimao::QimaoClient;
-#[cfg(feature = "shuqi")]
-use crate::shuqi::ShuqiClient;
-
-/// 更新检测的书籍来源，决定“远端章节数/完结态”走哪条抓取通路。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BookSource {
-    Fanqie,
-    Qimao,
-    Shuqi,
-}
-
-/// 由 book_id 判定来源：`sq:` 书旗、`qm:` 七猫，其余（纯数字）为番茄。
-pub fn source_of(book_id: &str) -> BookSource {
-    if book_id.starts_with("sq:") {
-        BookSource::Shuqi
-    } else if book_id.starts_with("qm:") {
-        BookSource::Qimao
-    } else {
-        BookSource::Fanqie
-    }
-}
 
 /// 按来源抓取远端 `(章节总数, 服务器完结态)`。
-/// 番茄走 web 目录接口 + 详情页；七猫走目录 + 详情（`is_over`）；
-/// 书旗 catalog 只给章节数（实测无 `isFinish`），完结态靠网关搜索按 bookId 对齐兜底。
-/// `book_name` 仅书旗兜底时需要。抓不到有效总数返回 `None`，调用方据此保留旧缓存，
+/// 外部源（带前缀）经 [`crate::provider::owner_of`] 分发到注册表内各源实现；
+/// 番茄（无前缀、注册表未命中）走 web 目录接口 + 详情页。
+/// 抓不到有效总数返回 `None`，调用方据此保留旧缓存，
 /// 不把 0 当成扫描结果。
 pub fn fetch_remote_state(book_id: &str, book_name: Option<&str>) -> Option<(usize, Option<bool>)> {
-    match source_of(book_id) {
-        BookSource::Fanqie => {
+    match crate::provider::owner_of(book_id) {
+        None => {
             let client = FanqieWebNetwork::new(FanqieWebConfig::default()).ok()?;
             let total = client
                 .fetch_chapter_list(book_id)
@@ -55,47 +32,8 @@ pub fn fetch_remote_state(book_id: &str, book_name: Option<&str>) -> Option<(usi
             // 同时拉详情页完结态，供“连载转完结→停扫”与手动回队判定。
             Some((total, client.get_book_info(book_id).8))
         }
-        BookSource::Qimao => fetch_qimao_state(book_id),
-        BookSource::Shuqi => fetch_shuqi_state(book_id, book_name),
+        Some(provider) => provider.fetch_update_state(book_id, book_name),
     }
-}
-
-/// 七猫：目录取章节数 + 详情取完结态。未启用 `qimao` feature 时不报错，当作“无从校验”。
-#[cfg(feature = "qimao")]
-fn fetch_qimao_state(book_id: &str) -> Option<(usize, Option<bool>)> {
-    let client = QimaoClient::new(UPDATE_FETCH_TIMEOUT_SECS).ok()?;
-    let total = client.chapter_list(book_id).ok()?.len();
-    if total == 0 {
-        return None;
-    }
-    let finished = client.book_meta(book_id).and_then(|m| m.finished);
-    Some((total, finished))
-}
-
-#[cfg(not(feature = "qimao"))]
-fn fetch_qimao_state(_book_id: &str) -> Option<(usize, Option<bool>)> {
-    None
-}
-
-/// 书旗：catalog 取章节数；完结态 catalog 接口不供（实测无 `isFinish`、`state` 为 null），
-/// 因此再走一次网关搜索按 bookId 对齐取 `state`。未启用 `shuqi` feature 时当作“无从校验”。
-#[cfg(feature = "shuqi")]
-fn fetch_shuqi_state(book_id: &str, book_name: Option<&str>) -> Option<(usize, Option<bool>)> {
-    let client = ShuqiClient::new(UPDATE_FETCH_TIMEOUT_SECS).ok()?;
-    let catalog = client.catalog(book_id).ok()?;
-    let total = catalog.chapters.len();
-    if total == 0 {
-        return None;
-    }
-    let finished = catalog
-        .finished
-        .or_else(|| book_name.and_then(|n| client.book_state_by_search(book_id, n)));
-    Some((total, finished))
-}
-
-#[cfg(not(feature = "shuqi"))]
-fn fetch_shuqi_state(_book_id: &str, _book_name: Option<&str>) -> Option<(usize, Option<bool>)> {
-    None
 }
 
 #[cfg(test)]
@@ -148,6 +86,34 @@ mod tests {
             parsed("7020269838396296228_重启人生"),
             Some(("7020269838396296228".to_string(), "重启人生".to_string()))
         );
+        // 笔趣阁：bb：<数字>（可带 _<书名>）
+        assert_eq!(
+            parsed("bb：37940_黑莲花攻略手册"),
+            Some((
+                "bb:37940".to_string(),
+                "bb：37940_黑莲花攻略手册".to_string()
+            ))
+        );
+        // 笔趣阁二站：book_id 自身含下划线 bg：<aid>_<bid>
+        assert_eq!(
+            parsed("bg：171_171712_黑莲花攻略手册"),
+            Some((
+                "bg:171_171712".to_string(),
+                "bg：171_171712_黑莲花攻略手册".to_string()
+            ))
+        );
+        assert_eq!(
+            parsed("bg：171_171712"),
+            Some(("bg:171_171712".to_string(), "bg：171_171712".to_string()))
+        );
+        // 东滩小说：dt：<数字>
+        assert_eq!(
+            parsed("dt：80579_黑莲花攻略手册"),
+            Some((
+                "dt:80579".to_string(),
+                "dt：80579_黑莲花攻略手册".to_string()
+            ))
+        );
         // 非书籍目录必须被拒（不能把 target/logs/.cargo 当成书）
         assert_eq!(parsed("target"), None);
         assert_eq!(parsed("logs"), None);
@@ -157,9 +123,16 @@ mod tests {
 
     #[test]
     fn source_of_maps_prefixes() {
-        assert_eq!(source_of("7496026299845053465"), BookSource::Fanqie);
-        assert_eq!(source_of("sq:9349463"), BookSource::Shuqi);
-        assert_eq!(source_of("qm:195631"), BookSource::Qimao);
+        // 带前缀 → 命中对应外部源；无前缀（番茄）→ 注册表未命中。
+        assert_eq!(
+            crate::provider::owner_of("sq:9349463").map(|p| p.id()),
+            Some("shuqi")
+        );
+        assert_eq!(
+            crate::provider::owner_of("qm:195631").map(|p| p.id()),
+            Some("qimao")
+        );
+        assert!(crate::provider::owner_of("7496026299845053465").is_none());
     }
 
     #[test]
@@ -321,10 +294,6 @@ struct CachedRemoteTotal {
 
 const UPDATE_CACHE_FILE: &str = ".tnd_update_cache.json";
 const UPDATE_CACHE_TTL_MS: u64 = 10 * 60 * 1000;
-/// 七猫/书旗更新检测的 HTTP 超时（与番茄 `FanqieWebConfig::default()` 保持一致口径）。
-/// 两个源均未启用时不会被引用，故随 feature 条件保留。
-#[cfg(any(feature = "qimao", feature = "shuqi"))]
-const UPDATE_FETCH_TIMEOUT_SECS: u64 = 15;
 const UPDATE_SCAN_WORKERS: usize = 4;
 /// 冷启动秒显用的完整扫描结果快照（区别于逐本 remote_total 的 TTL 缓存）。
 const UPDATE_SNAPSHOT_FILE: &str = ".tnd_update_snapshot.json";
@@ -839,14 +808,38 @@ fn fetch_remote_totals_worker(
 
 /// 缓存目录名 → `(book_id, 展示名)`。
 ///
-/// 兼容三类：纯数字（番茄）、`sq：/qm：`（书旗/七猫，`safe_fs_name` 会把 `:` 转成全角 `：`，
-/// 故半角/全角都吃下，并可带旧版 `_<书名>` 后缀）、以及旧版 `<数字>_<书名>`。
+/// 兼容三类：纯数字（番茄）、`sq：/qm：/zs：`（书旗/七猫/姿势吧，`safe_fs_name` 会把 `:`
+/// 转成全角 `：`，故半角/全角都吃下，并可带旧版 `_<书名>` 后缀）、以及旧版 `<数字>_<书名>`。
 fn parse_book_folder_name(name: &str) -> Option<(String, String)> {
     if name.chars().all(|c| c.is_ascii_digit()) && !name.is_empty() {
         return Some((name.to_string(), name.to_string()));
     }
 
-    for (tag, canonical) in [("sq", "sq:"), ("qm", "qm:")] {
+    // 笔趣阁二站：book_id 自身含下划线（`bg:171_171712`），需取前两段数字，
+    // 其后可能还有 `_<书名>` 后缀。
+    for sep in ['：', ':'] {
+        let Some(rest) = name.strip_prefix(&format!("bg{sep}")) else {
+            continue;
+        };
+        let parts: Vec<&str> = rest.split('_').collect();
+        if parts.len() >= 2
+            && !parts[0].is_empty()
+            && !parts[1].is_empty()
+            && parts[0].chars().all(|c| c.is_ascii_digit())
+            && parts[1].chars().all(|c| c.is_ascii_digit())
+        {
+            return Some((format!("bg:{}_{}", parts[0], parts[1]), name.to_string()));
+        }
+    }
+
+    for (tag, canonical) in [
+        ("sq", "sq:"),
+        ("qm", "qm:"),
+        ("zs", "zs:"),
+        ("bx", "bx:"),
+        ("bb", "bb:"),
+        ("dt", "dt:"),
+    ] {
         for sep in ['：', ':'] {
             let Some(rest) = name.strip_prefix(&format!("{tag}{sep}")) else {
                 continue;

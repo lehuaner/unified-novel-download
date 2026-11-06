@@ -1,5 +1,10 @@
+[build]
+# 关闭增量编译缓存：长期 cargo watch 会把 target/debug/incremental 涨到十几 GB。
+incremental = false
+
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
 
 # aarch64-linux-android linker is set via CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER
 # env var in build-android.ps1 (local) or GitHub Actions (CI)
+

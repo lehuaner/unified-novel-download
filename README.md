@@ -1,5 +1,7 @@
 # Unified Novel Downloader
 
+> 版本更新说明见 [CHANGELOG.md](CHANGELOG.md)。
+
 一个用 Rust 编写的多源小说下载器：搜索、抓取、导出为 txt / EPUB / PDF，并可选生成有声书。提供 TUI、Web UI、无障碍命令行三种入口，支持断点续传与下载库管理。
 
 项目早期基于 [Dlmily/Tomato-Novel-Downloader-Lite](https://github.com/Dlmily/Tomato-Novel-Downloader-Lite) 衍生，后经完全重构，现由 [lehuaner](https://github.com/lehuaner) 维护。
@@ -15,6 +17,12 @@
 | 番茄 / 扇听（fanqie） | `7020269838396296228`、分享链接、短链 | Web UI ✅ / TUI ✅（分类 tab + 筛选器 + 分页） | 网页解析 | 第三方 API 地址池 **或** 本地 unidbg 签名 sidecar | ⚠️ 需二选一配置，见[正文获取方式](#正文获取方式) |
 | 书旗（shuqi） | `sq:8969239` | ✅ | 书旗开放接口 | 书旗章节接口 | ✅ |
 | 七猫（qimao） | `qm:152109` | ✅ | 七猫接口 | 整本缓存包 | ✅ |
+| 姿势吧（zishiba） | `zs:113075`、`https://www.zishiba.com/book/113075/` | ✅（搜索关键字按站点限制自动截断到 20 字节，约 6 个汉字） | 站点目录接口 | 章节页解析 | ✅ |
+| 笔下文学（hen0） | `bx:592874`、`https://www.hen0.com/book/592874/` | ✅（GBK；站点节流为纯 Cookie 侧） | 站点目录分页 | 章节页解析（含 CSS 伪元素注入段落） | ✅ |
+| 笔趣阁（biqubee） | `bb:37940`、`https://www.biqubee.com/bi_37940/` | ✅（站点 IP 级窗口；撞窗口直接跳过不排队，同词缓存 10 秒） | `?page=n` 目录分页（100 章/页） | 章节页解析（自动合并章内分页） | ✅ |
+| 笔趣阁二站（biquga） | `bg:171_171712`、`https://www.biquga.com/171_171712/` | ✅ | 详情页前 100 章 + 最新章节（站点目录页已污染，无法翻页） | 章节页解析（Base64 脚本解码 + 章内分页） | ⚠️ 目录仅前 100 章 + 最新章节 |
+| 东滩小说（dongtan） | `dt:80579`、`http://www.dongtanxs.com/dong80579/` | ✅ | 详情页即全量目录 | 章节页解析 | ✅ |
+| 官术网（guanshuya） | `gs:108891`、`https://www.guanshuya.net/html/108/108891/` | ⚠️ 需配置 `guanshuya_cookie`（Cloudflare `cf_clearance`）与匹配 UA | 站点目录分页 | 章节页解析（自动剔除固定推广语） | ⚠️ 需配置 Cookie |
 
 - 无前缀的纯数字 ID 默认按番茄处理；若番茄侧解析失败，会自动回退尝试书旗、七猫。
 - 番茄的目录与书本信息由网页接口解析获得，不依赖任何官方客户端库。
@@ -80,6 +88,7 @@ UnifiedNovelDownloader-Win64-v<版本号>.exe --server
 浏览器打开 `http://127.0.0.1:18423/`。当前只有**搜索**与**下载库**两个页面，具体能力：
 
 - 多源搜索（番茄分类 tab / 筛选器，书旗、七猫翻页），支持“加载更多”、搜索记录与一键清空
+- 搜索以番茄返回为显示时机：番茄结果一到立即上屏，其余源在后台继续、完成后增量补显（撞站点窗口的源直接跳过，不拖慢搜索框）
 - 书籍预览：核对封面 / 作者 / 字数 / 章节数，可选填下载范围（如 `1-50`）后再开始
 - 下载完成后弹窗确认书名与输出格式
 - 下载库浏览（按目录，不递归平铺）：刷新扫描、列数切换、按卡片下载成品文件、删除文件、目录打包为 zip（保留目录结构，适配有声书）
@@ -168,6 +177,7 @@ unidbg_signer_url: http://127.0.0.1:8099
 | --- | --- |
 | `novel_format` | 输出格式：`txt` / `epub` / `pdf`，也支持"散装文件"或"下载后询问" |
 | `max_workers` | 并发线程数（默认 1；请勿盲目调高，会加大上游压力） |
+| `biqubee_workers` / `biquga_workers` / `dongtan_workers` | 新源下载并发（默认 4 / 4 / 2；实测东滩 4 线程会被站点限流，上限 2） |
 | `request_timeout` / `max_retries` / `min_wait_time` / `max_wait_time` / `min_connect_timeout` | 超时与退避重试 |
 | `save_path` | 保存目录，留空则使用程序所在目录 |
 | `enable_audiobook` 及 `audiobook_*` | 有声小说开关与参数 |
@@ -215,7 +225,7 @@ cargo build --release --no-default-features --features shuqi,qimao,tts-native,cl
 
 | feature | 作用 |
 | --- | --- |
-| `shuqi` / `qimao` | 启用书旗 / 七猫源（已在 `default` 中） |
+| `shuqi` / `qimao` / `zishiba` | 启用书旗 / 七猫 / 姿势吧源（已在 `default` 中） |
 | `tts` | Edge TTS（`msedge-tts`，默认启用） |
 | `tts-native` | 以 `tungstenite` 实现 TTS，避免 openssl/curl 等原生依赖，适合 musl / android |
 | `clipboard` / `clipboard-arboard` | TUI 剪贴板；Android 走 Termux API，桌面走 arboard |
@@ -294,3 +304,8 @@ cargo build --release --no-default-features --features shuqi,qimao,tts-native,cl
 
 - 感谢原作者 Dlmily（<https://github.com/Dlmily>）的基础项目，本程序由此衍生后完全重构
 - 感谢一路以来的用户，欢迎点 Star 与提建议，你们的反馈是我持续更新的最大动力 ❤️
+
+
+
+
+

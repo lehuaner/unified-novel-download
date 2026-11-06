@@ -166,6 +166,8 @@ pub fn inject_segment_links(
     for m in para_and_heading_regex().find_iter(content_html) {
         out.push_str(&content_html[last_end..m.start()]);
 
+        // 不变量：m 来自同一条 regex 的 find_iter 命中，纯函数式重匹配其子串必再命中，
+        // 且组结构不受起始位置影响，get(4) 语义一致。
         let caps = para_and_heading_regex().captures(m.as_str()).unwrap();
 
         // Check if this is a heading (group 4)

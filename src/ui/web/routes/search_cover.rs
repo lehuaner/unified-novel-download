@@ -14,6 +14,71 @@ pub(crate) struct CoverQuery {
     pub(crate) url: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct BookCoverQuery {
+    pub(crate) book_id: String,
+}
+
+/// 按 book_id 懒加载封面：来源站搜索页大多没有封面，这里按需拉一次详情页取封面，
+/// 再 302 到 `/api/search-cover` 走统一代理/压缩。前端只会在无封面卡片进入视口时调用。
+pub(crate) async fn api_book_cover(
+    Query(q): Query<BookCoverQuery>,
+) -> Result<Response, StatusCode> {
+    let book_id = q.book_id.trim().to_string();
+    if book_id.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let cover = tokio::task::spawn_blocking(move || {
+        crate::provider::owner_of(&book_id)
+            .and_then(|p| p.preview_summary(&book_id, 8))
+            .and_then(|m| m.cover_url)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+    let proxied = format!("/api/search-cover?url={}", percent_encode(&cover));
+    Ok(build_redirect_response(&proxied))
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct OfficialCoverQuery {
+    pub(crate) official_id: String,
+}
+
+/// 按官网 official_id 懒加载封面：判定为晋江的条目封面必须来自官网，
+/// 不能用下载源封面顶替（设计约定 §7.4）。
+pub(crate) async fn api_official_cover(
+    Query(q): Query<OfficialCoverQuery>,
+) -> Result<Response, StatusCode> {
+    let official_id = q.official_id.trim().to_string();
+    if official_id.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let cover = tokio::task::spawn_blocking(move || {
+        crate::official::find("jjwxc")
+            .and_then(|src| src.fetch_detail(&official_id, 8).ok())
+            .and_then(|detail| detail.cover_url)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+    let proxied = format!("/api/search-cover?url={}", percent_encode(&cover));
+    Ok(build_redirect_response(&proxied))
+}
+/// 只编码非 unreserved 字符，用于把封面 URL 放进 query 参数。
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 /// 搜索结果封面缩略图端点。
 ///
 /// 流程：下载远程封面 → 压缩为 JPEG 缩略图（max 120px，quality 70）→ 内存缓存 → 返回。

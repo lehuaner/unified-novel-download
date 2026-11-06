@@ -942,6 +942,102 @@ pub fn search_items(client: &ShuqiClient, keyword: &str, page: u32) -> Result<(V
     Ok((items, book_count > 0))
 }
 
+// ── BookProvider 适配器 ────────────────────────────────────────
+
+/// 书旗源适配器：实现统一 [`crate::provider::BookProvider`]，
+/// 全部委托给模块内既有自由函数（保持旧调用与测试不变）。
+pub struct ShuqiProvider;
+
+impl crate::provider::BookProvider for ShuqiProvider {
+    fn id(&self) -> &'static str {
+        "shuqi"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "书旗"
+    }
+
+    fn owns_book_id(&self, book_id: &str) -> bool {
+        is_shuqi_book_id(book_id)
+    }
+
+    fn normalize_book_input(&self, input: &str) -> Option<String> {
+        normalize_book_input(input)
+    }
+
+    fn allow_numeric_fallback(&self) -> bool {
+        true
+    }
+
+    fn prepare_numeric_fallback(
+        &self,
+        config: &crate::base_system::context::Config,
+        numeric_id: &str,
+        meta_hint: crate::download::models::BookMeta,
+    ) -> anyhow::Result<crate::download::models::DownloadPlan> {
+        prepare_shuqi_plan(config, &format!("sq:{numeric_id}"), meta_hint)
+    }
+
+    fn search(
+        &self,
+        opts: &crate::provider::SearchOptions,
+    ) -> anyhow::Result<(Vec<serde_json::Value>, bool)> {
+        let client = ShuqiClient::new(opts.timeout_secs)?;
+        search_items(&client, &opts.keyword, opts.page)
+    }
+
+    fn prepare_plan(
+        &self,
+        config: &crate::base_system::context::Config,
+        book_id: &str,
+        meta_hint: crate::download::models::BookMeta,
+    ) -> anyhow::Result<crate::download::models::DownloadPlan> {
+        prepare_shuqi_plan(config, book_id, meta_hint)
+    }
+
+    fn download_into_manager(
+        &self,
+        config: &crate::base_system::context::Config,
+        book_id: &str,
+        book_name: &str,
+        manager: &mut crate::book_parser::book_manager::BookManager,
+        chosen_chapters: &[crate::download::models::ChapterRef],
+        pending_chapters: &[crate::download::models::ChapterRef],
+        reporter: &mut crate::download::progress::ProgressReporter,
+        cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> anyhow::Result<crate::download::models::DownloadResult> {
+        download_shuqi_into_manager(
+            config,
+            book_id,
+            book_name,
+            manager,
+            chosen_chapters,
+            pending_chapters,
+            reporter,
+            cancel,
+        )
+    }
+
+    fn fetch_update_state(
+        &self,
+        book_id: &str,
+        book_name: Option<&str>,
+    ) -> Option<(usize, Option<bool>)> {
+        // catalog 取章节数；完结态 catalog 接口不供（实测无 `isFinish`、`state` 为 null），
+        // 因此再走一次网关搜索按 bookId 对齐取 `state`。
+        let client = ShuqiClient::new(crate::provider::UPDATE_FETCH_TIMEOUT_SECS).ok()?;
+        let catalog = client.catalog(book_id).ok()?;
+        let total = catalog.chapters.len();
+        if total == 0 {
+            return None;
+        }
+        let finished = catalog
+            .finished
+            .or_else(|| book_name.and_then(|n| client.book_state_by_search(book_id, n)));
+        Some((total, finished))
+    }
+}
+
 // ── 测试 ──────────────────────────────────────────────────────
 
 #[cfg(test)]

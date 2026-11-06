@@ -1,17 +1,17 @@
 [package]
 name = "unified-novel-downloader"
-version = "2.6.6"
+version = "2.7.0"
 edition = "2024"
-description = "Unified novel downloader supporting multiple providers (Fanqie, Shuqi, Qimao)"
+description = "Unified novel downloader supporting multiple providers (Fanqie, Shuqi, Qimao, Zishiba, Hen0, Guanshuya, Biqubee, Biquga, Dongtan)"
 repository = "https://github.com/lehuaner/unified-novel-download"
 authors = ["lehuaner"]
 license = "MIT"
 
 [features]
-# 默认构建：包含全部小说源（番茄 / 书旗 / 七猫）+ TTS + 桌面剪贴板。
-# 重要：shuqi / qimao 必须在默认组合里，否则本地 `cargo test / clippy` 根本不会编译
-# 这两个源的代码路径，而 CI 与 Release 产物都是带它们的（曾因此漏掉编译错误）。
-default = ["tts", "clipboard", "clipboard-arboard", "shuqi", "qimao"]
+# 默认构建：包含全部小说源（番茄 / 书旗 / 七猫 / 姿势吧 / 笔下文学 / 官术网）+ TTS + 桌面剪贴板。
+# 重要：shuqi / qimao / zishiba / hen0 / guanshuya 必须在默认组合里，否则本地 `cargo test / clippy` 根本不会编译
+# 这些源的代码路径，而 CI 与 Release 产物都是带它们的（曾因此漏掉编译错误）。
+default = ["tts", "clipboard", "clipboard-arboard", "shuqi", "qimao", "zishiba", "hen0", "guanshuya", "biqubee", "biquga", "dongtan", "jjwxc"]
 
 # 有声书（TTS）：默认启用；在 musl/android 等环境可关闭以避免 OpenSSL/curl 等原生依赖。
 tts = ["dep:msedge-tts"]
@@ -36,6 +36,37 @@ shuqi = ["dep:md-5", "dep:hmac"]
 
 # 七猫（Qimao）小说提供商：通过 `qm:<bookId>` 前缀路由，整本缓存 ZIP 下载。
 qimao = ["dep:md-5"]
+
+# 姿势吧（zishiba.com，帝国CMS 站）小说提供商：通过 `zs:<bookId>` 前缀路由。
+# 无签名无加密，HTML+JSON 直连；搜索关键字按站点限制截断（UTF-8 字节 2~20），搜索链路净身请求。
+zishiba = []
+
+# 笔下文学（www.hen0.com，杰奇 CMS 站）小说提供商：通过 `bx:<bookId>` 前缀路由。
+# 全站 GBK 编解码（encoding_rs）；搜索纯 Cookie 侧节流（净身请求天然绕过）；
+# 正文为「HTML 文本 + CSS ::after 伪元素注入」混排，需统一提取管线。
+hen0 = []
+
+# 官术网（guanshuya.net，杰奇系模板）小说提供商：通过 `gs:<bookId>` 前缀路由。
+# 详情/目录/正文优先 www + Cookie；无 Cookie 回退移动站。搜索 search.php 受
+# Cloudflare 托管挑战保护，需在 config.yml 配置 guanshuya_cookie（cf_clearance）与匹配的 UA。
+guanshuya = []
+
+# 笔趣阁（www.biqubee.com）小说提供商：通过 `bb:<bookId>` 前缀路由。
+# 搜索有 10 秒服务端冷却；目录 ?page=n 分页；正文 br 分段、章内分页 {seq}_{p}.html。
+biqubee = []
+
+# 笔趣阁二站（www.biquga.com）小说提供商：通过 `bg:<aid>_<bid>` 前缀路由。
+# 正文为 Base64 脚本逐段输出；站点目录页 index_{n}.html 已污染，只能取前 100 章 + 最新章节。
+biquga = []
+
+# 东滩小说（www.dongtanxs.com）小说提供商：通过 `dt:<bookId>` 前缀路由。
+# 详情页即全量目录；正文 /dongtan{id}/{cid}.html，无章内分页。
+dongtan = []
+
+# 晋江（jjwxc.net）官方源：不作为独立下载源，只提供搜索/元数据，
+# 供聚合层把资源站（姿势吧/笔下文学）的条目判定为「晋江」。
+# 走公开网页搜索（GB18030）+ app-cdn 详情接口，无需 App 加密。
+jjwxc = []
 
 [dependencies]
 anyhow = "1.0"
@@ -69,6 +100,7 @@ textwrap = "0.16"
 epub-builder = "0.7"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "gzip"] }
+encoding_rs = "0.8"
 md-5 = { version = "0.10", optional = true }
 hmac = { version = "0.12", optional = true }
 axum = "0.7"
@@ -90,3 +122,4 @@ debug = false
 panic = "unwind"
 strip = "symbols"
 incremental = false
+

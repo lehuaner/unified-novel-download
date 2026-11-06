@@ -5,7 +5,10 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::path::{Path as FsPath, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 use crate::base_system::book_id::resolve_book_id;
@@ -181,6 +184,14 @@ pub(crate) async fn api_preview(
     if book_id.is_empty() {
         return Err(api_error(StatusCode::BAD_REQUEST, "book_id 为空"));
     }
+    // 预览结果短 TTL 缓存：同一本书反复打开 / 切换下载源时秒开。
+    let cache_key = format!(
+        "{book_id}|{}",
+        pq.hint_title.as_deref().unwrap_or("").trim()
+    );
+    if let Some(cached) = preview_cache_get(&cache_key) {
+        return Ok(Json(cached));
+    }
 
     // 并发限制：与 search 共用同一个信号量，最多 2 个上游 API 请求并发。
     let _permit = state
@@ -205,22 +216,35 @@ pub(crate) async fn api_preview(
         ..Default::default()
     };
 
-    let plan = tokio::task::spawn_blocking(move || {
-        dl::prepare_download_plan(&cfg_for_plan, &book_id_for_plan, hint)
+    // 资源站有轻量预览摘要（详情 + 首/末章 + 总数），不拉完整目录；
+    // 免费平台/不支持摘要的源回退完整下载计划。
+    let timeout_secs = cfg.request_timeout.max(5);
+    let book_id_for_summary = book_id.clone();
+    let summary = tokio::task::spawn_blocking(move || {
+        crate::provider::owner_of(&book_id_for_summary)
+            .and_then(|p| p.preview_summary(&book_id_for_summary, timeout_secs))
     })
     .await
-    .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "预览任务执行失败"))?
-    .map_err(|err| api_error(StatusCode::BAD_GATEWAY, format!("加载目录失败: {err}")))?;
+    .ok()
+    .flatten();
 
-    let meta = &plan.meta;
-    let chapter_count = plan.chapters.len();
-    // 使用 plan.book_id（可能含 sq: 前缀）而非输入的 book_id，
-    // 确保前端后续操作（创建下载任务等）使用正确的规范化 ID。
-    let resolved_book_id = &plan.book_id;
+    let (resolved_book_id, meta, chapter_count) = if let Some(m) = summary {
+        let count = m.chapter_count.unwrap_or(0);
+        (book_id.clone(), m, count)
+    } else {
+        let plan = tokio::task::spawn_blocking(move || {
+            dl::prepare_download_plan(&cfg_for_plan, &book_id_for_plan, hint)
+        })
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "预览任务执行失败"))?
+        .map_err(|err| api_error(StatusCode::BAD_GATEWAY, format!("加载目录失败: {err}")))?;
+        (plan.book_id.clone(), plan.meta.clone(), plan.chapters.len())
+    };
 
     // 番茄网页详情页不存在（404）或抓取失败时，get_book_info 会静默返回全 None，
     // 而目录/章节走另一条通道仍成功。此时必须如实标注，不能让 UI 拿空值渲染“未知书名”。
-    let is_fanqie = !(resolved_book_id.starts_with("sq:") || resolved_book_id.starts_with("qm:"));
+    // 外部源（sq:/qm:/zs:/bx: 等前缀）按非番茄处理：注册表未命中即番茄。
+    let is_fanqie = crate::provider::owner_of(&resolved_book_id).is_none();
     let meta_missing = is_fanqie && meta.author.is_none() && meta.description.is_none();
 
     let cfg_for_cover = cfg.clone();
@@ -240,7 +264,7 @@ pub(crate) async fn api_preview(
         .map(|k| format!("/api/preview-cover/{k}"))
         .or_else(|| Some(format!("/api/preview-cover-by-book/{resolved_book_id}")));
 
-    Ok(Json(json!({
+    let resp = json!({
         "book_id": resolved_book_id,
         "book_name": meta.book_name,
         "original_book_name": meta.original_book_name,
@@ -262,7 +286,37 @@ pub(crate) async fn api_preview(
         "meta_missing": meta_missing,
         // 缺失但仍有书名时，说明该名字来自调用方 hint（搜索接口），而非详情页
         "book_name_from_hint": meta_missing && meta.book_name.is_some(),
-    })))
+    });
+    preview_cache_put(cache_key, resp.clone());
+    Ok(Json(resp))
+}
+
+/// 预览缓存：5 分钟 TTL，最多 200 条（超出直接清空，避免无界增长）。
+const PREVIEW_CACHE_TTL_SECS: u64 = 300;
+const PREVIEW_CACHE_MAX: usize = 200;
+
+fn preview_cache() -> &'static Mutex<HashMap<String, (Instant, Value)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Value)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn preview_cache_get(key: &str) -> Option<Value> {
+    let mut map = preview_cache().lock().ok()?;
+    let (at, value) = map.get(key)?;
+    if at.elapsed() > Duration::from_secs(PREVIEW_CACHE_TTL_SECS) {
+        map.remove(key);
+        return None;
+    }
+    Some(value.clone())
+}
+
+fn preview_cache_put(key: String, value: Value) {
+    if let Ok(mut map) = preview_cache().lock() {
+        if map.len() >= PREVIEW_CACHE_MAX {
+            map.clear();
+        }
+        map.insert(key, (Instant::now(), value));
+    }
 }
 
 /// 预览补档：复用预览的取数据途径（prepare_download_plan），若该 book_id 尚无有效存档，
@@ -283,34 +337,48 @@ pub(crate) async fn api_preview_archive(
     if book_id.is_empty() {
         return Err(api_error(StatusCode::BAD_REQUEST, "book_id 为空"));
     }
-
     let cfg = state
         .config
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let cfg_for_plan = cfg.clone();
-    let book_id_for_plan = book_id.clone();
-    let plan = tokio::task::spawn_blocking(move || {
-        dl::prepare_download_plan(&cfg_for_plan, &book_id_for_plan, dl::BookMeta::default())
+    let timeout_secs = cfg.request_timeout.max(5);
+    let book_id_for_summary = book_id.clone();
+    let summary = tokio::task::spawn_blocking(move || {
+        crate::provider::owner_of(&book_id_for_summary)
+            .and_then(|p| p.preview_summary(&book_id_for_summary, timeout_secs))
     })
     .await
-    .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "补档任务执行失败"))?
-    .map_err(|err| api_error(StatusCode::BAD_GATEWAY, format!("补档失败: {err}")))?;
+    .ok()
+    .flatten();
 
-    let meta = &plan.meta;
+    let (resolved_id, meta, chapter_count) = if let Some(m) = summary {
+        let count = m.chapter_count.unwrap_or(0);
+        (book_id.clone(), m, count)
+    } else {
+        let cfg_for_plan = cfg.clone();
+        let book_id_for_plan = book_id.clone();
+        let plan = tokio::task::spawn_blocking(move || {
+            dl::prepare_download_plan(&cfg_for_plan, &book_id_for_plan, dl::BookMeta::default())
+        })
+        .await
+        .map_err(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "补档任务执行失败"))?
+        .map_err(|err| api_error(StatusCode::BAD_GATEWAY, format!("补档失败: {err}")))?;
+        (plan.book_id.clone(), plan.meta.clone(), plan.chapters.len())
+    };
+
     let book_name = meta
         .book_name
         .clone()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| plan.book_id.clone());
+        .unwrap_or_else(|| resolved_id.clone());
     let author = meta.author.clone().unwrap_or_default();
 
     let record = DownloadHistoryRecord::new(
-        plan.book_id.clone(),
+        resolved_id.clone(),
         book_name,
         author,
-        plan.chapters.len(),
+        chapter_count,
         0,
         0,
         "archive".to_string(),
@@ -328,10 +396,10 @@ pub(crate) async fn api_preview_archive(
         },
     );
 
-    let archived = archive_book_meta(&plan.book_id, &record);
+    let archived = archive_book_meta(&resolved_id, &record);
     Ok(Json(json!({
         "ok": true,
-        "book_id": plan.book_id,
+        "book_id": resolved_id,
         "archived": archived,
     })))
 }

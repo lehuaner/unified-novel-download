@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 姿势吧（zishiba.com）来源角标：圆角底 + 「姿」字。抓包未取到站点图标，此为占位设计，可随时替换。 -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#5b6ee1"/>
+  <text x="32" y="45" font-family="'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',sans-serif" font-size="38" font-weight="700" fill="#ffffff" text-anchor="middle">姿</text>
+</svg>

@@ -605,6 +605,11 @@ button.success {
 }
 
 .previewCard { max-width: 680px; }
+.preview-source-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.preview-source-tab { border: 1px solid var(--border); background: transparent; color: var(--text-main); border-radius: 999px; padding: 5px 14px; font-size: .84rem; line-height: 1.4; cursor: pointer; }
+.preview-source-tab:hover { border-color: var(--primary); color: var(--primary); }
+.preview-source-tab.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.preview-source-tab:disabled { opacity: .5; cursor: not-allowed; }
 
 .modalHeader {
   display: flex;
@@ -878,6 +883,8 @@ button.success {
 .tag-green { background: #e8f5e9; color: #2e7d32; }
 .tag-blue { background: #e3f2fd; color: #1565c0; }
 .tag-orange { background: #fff3e0; color: #e65100; }
+.tag-purple { background: #f3e5f5; color: #6a1b9a; }
+.tag-teal { background: #e0f2f1; color: #00695c; }
 
 /* ===== Search Home Panels ===== */
 .home-panels { display: flex; flex-direction: column; gap: 18px; }

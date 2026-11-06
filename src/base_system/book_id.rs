@@ -83,16 +83,12 @@ pub fn parse_book_id(input: &str) -> Option<String> {
         return Some(trimmed.to_string());
     }
 
-    // 书旗（Shuqi）识别：sq: 前缀或 shuqi.com URL
-    #[cfg(feature = "shuqi")]
-    if let Some(id) = crate::shuqi::normalize_book_input(trimmed) {
-        return Some(id);
-    }
-
-    // 七猫（Qimao）识别：qm: 前缀或 qimao.com/wtzw.com URL
-    #[cfg(feature = "qimao")]
-    if let Some(id) = crate::qimao::normalize_book_input(trimmed) {
-        return Some(id);
+    // 外部源识别（sq:/qm:/zs:/bx:/gs:/bb:/bg:/dt: 前缀或对应站点 URL）：
+    // 遍历按 feature 裁剪后的书源注册表，各源自带归一化逻辑。
+    for provider in crate::provider::providers() {
+        if let Some(id) = provider.normalize_book_input(trimmed) {
+            return Some(id);
+        }
     }
 
     // If user pasted extra text around the URL, try to extract URL first.

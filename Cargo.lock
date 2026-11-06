@@ -3726,7 +3726,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "unified-novel-downloader"
-version = "2.6.6"
+version = "2.7.0"
 dependencies = [
  "aes",
  "anyhow",
@@ -3737,6 +3737,7 @@ dependencies = [
  "crossbeam-channel",
  "crossterm",
  "ctrlc",
+ "encoding_rs",
  "epub-builder",
  "flate2",
  "futures-core",

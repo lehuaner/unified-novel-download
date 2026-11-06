@@ -941,6 +941,119 @@ fn pick_any_str(v: &Value, keys: &[&str]) -> Option<String> {
     None
 }
 
+// ── BookProvider 适配器 ────────────────────────────────────────
+
+/// 七猫源适配器：实现统一 [`crate::provider::BookProvider`]，
+/// 全部委托给模块内既有自由函数（保持旧调用与测试不变）。
+pub struct QimaoProvider;
+
+impl crate::provider::BookProvider for QimaoProvider {
+    fn id(&self) -> &'static str {
+        "qimao"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "七猫"
+    }
+
+    fn owns_book_id(&self, book_id: &str) -> bool {
+        is_qimao_book_id(book_id)
+    }
+
+    fn normalize_book_input(&self, input: &str) -> Option<String> {
+        normalize_book_input(input)
+    }
+
+    fn allow_numeric_fallback(&self) -> bool {
+        true
+    }
+
+    fn prepare_numeric_fallback(
+        &self,
+        config: &crate::base_system::context::Config,
+        numeric_id: &str,
+        meta_hint: crate::download::models::BookMeta,
+    ) -> anyhow::Result<crate::download::models::DownloadPlan> {
+        prepare_qimao_plan(config, &format!("qm:{numeric_id}"), meta_hint)
+    }
+
+    fn search(
+        &self,
+        opts: &crate::provider::SearchOptions,
+    ) -> anyhow::Result<(Vec<serde_json::Value>, bool)> {
+        let client = QimaoClient::new(opts.timeout_secs)?;
+        search_items(
+            &client,
+            &opts.keyword,
+            opts.page,
+            opts.tab,
+            opts.selected_items.as_deref(),
+        )
+    }
+
+    fn search_meta(&self, has_more: bool, tab: i64) -> serde_json::Value {
+        // 七猫实测有分类 tab（公共编号 1综合/2听书/3书籍，详见 qimao_tabs 文档）。
+        serde_json::json!({
+            "tabs": qimao_tabs(),
+            "selector": qimao_selector(),
+            "has_more": has_more,
+            "next_offset": 0,
+            "tab_type": tab,
+        })
+    }
+
+    fn selector(&self) -> serde_json::Value {
+        qimao_selector()
+    }
+
+    fn prepare_plan(
+        &self,
+        config: &crate::base_system::context::Config,
+        book_id: &str,
+        meta_hint: crate::download::models::BookMeta,
+    ) -> anyhow::Result<crate::download::models::DownloadPlan> {
+        prepare_qimao_plan(config, book_id, meta_hint)
+    }
+
+    fn download_into_manager(
+        &self,
+        config: &crate::base_system::context::Config,
+        book_id: &str,
+        book_name: &str,
+        manager: &mut crate::book_parser::book_manager::BookManager,
+        chosen_chapters: &[crate::download::models::ChapterRef],
+        pending_chapters: &[crate::download::models::ChapterRef],
+        reporter: &mut crate::download::progress::ProgressReporter,
+        cancel: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> anyhow::Result<crate::download::models::DownloadResult> {
+        download_qimao_into_manager(
+            config,
+            book_id,
+            book_name,
+            manager,
+            chosen_chapters,
+            pending_chapters,
+            reporter,
+            cancel,
+        )
+    }
+
+    fn fetch_update_state(
+        &self,
+        book_id: &str,
+        _book_name: Option<&str>,
+    ) -> Option<(usize, Option<bool>)> {
+        // 目录取章节数 + 详情取完结态（`is_over`）。
+        let client = QimaoClient::new(crate::provider::UPDATE_FETCH_TIMEOUT_SECS).ok()?;
+        let total = client.chapter_list(book_id).ok()?.len();
+        if total == 0 {
+            return None;
+        }
+        let finished = client.book_meta(book_id).and_then(|m| m.finished);
+        Some((total, finished))
+    }
+}
+
 // ── 测试 ──────────────────────────────────────────────────────
 
 #[cfg(test)]

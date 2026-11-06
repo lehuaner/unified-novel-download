@@ -12,17 +12,33 @@
 use anyhow::{Result, anyhow};
 use clap::Parser;
 
+mod aggregate;
 mod base_system;
+#[cfg(feature = "biqubee")]
+mod biqubee;
+#[cfg(feature = "biquga")]
+mod biquga;
 mod book_parser;
+#[cfg(feature = "dongtan")]
+mod dongtan;
 mod download;
+#[cfg(feature = "guanshuya")]
+mod guanshuya;
+#[cfg(feature = "hen0")]
+mod hen0;
 mod network_parser;
+mod official;
+mod pool;
 mod prewarm_state;
+mod provider;
 #[cfg(feature = "qimao")]
 mod qimao;
 #[cfg(feature = "shuqi")]
 mod shuqi;
 mod third_party;
 mod ui;
+#[cfg(feature = "zishiba")]
+mod zishiba;
 
 use base_system::config::{ConfigSpec, load_or_create, load_or_create_with_base};
 use base_system::context::Config;
@@ -105,6 +121,20 @@ fn main() -> Result<()> {
     let _ = base_system::self_update::check_hotfix_and_apply(VERSION);
 
     let mut config = load_config_from_data_dir(data_dir)?;
+    #[cfg(feature = "guanshuya")]
+    {
+        if config.guanshuya_cookie.trim().is_empty()
+            && let Some(v) = base_system::env_first(&["GUANSHUYA_COOKIE"])
+        {
+            config.guanshuya_cookie = v.trim().to_string();
+        }
+        if config.guanshuya_user_agent.trim().is_empty()
+            && let Some(v) = base_system::env_first(&["GUANSHUYA_UA", "GUANSHUYA_USER_AGENT"])
+        {
+            config.guanshuya_user_agent = v.trim().to_string();
+        }
+        crate::guanshuya::set_default_cookie(&config.guanshuya_cookie);
+    }
 
     // 番茄自签 sidecar 地址：config.yml 未入库（新机器默认为空）时用环境变量兜底，
     // 使容器/一键启动无需手工编辑 config.yml。兼容改名前的 TOMATO_* 变量。

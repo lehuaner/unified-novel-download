@@ -312,25 +312,10 @@ pub(crate) fn download_chapters_into_manager(
     reporter: &mut ProgressReporter,
     cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<DownloadResult> {
-    // 书旗（Shuqi）路由：跳过番茄段评逻辑，直接走书旗下载流程。
-    #[cfg(feature = "shuqi")]
-    if crate::shuqi::is_shuqi_book_id(book_id) {
-        return crate::shuqi::download_shuqi_into_manager(
-            config,
-            book_id,
-            book_name,
-            manager,
-            chosen_chapters,
-            pending_chapters,
-            reporter,
-            cancel,
-        );
-    }
-
-    // 七猫（Qimao）路由：整本缓存 ZIP 下载，跳过番茄段评逻辑。
-    #[cfg(feature = "qimao")]
-    if crate::qimao::is_qimao_book_id(book_id) {
-        return crate::qimao::download_qimao_into_manager(
+    // 外部源路由：跳过番茄段评逻辑，按注册表识别前缀后走对应源的下载流程
+    //（书旗网关 / 七猫整本 ZIP / 姿势吧逐章 HTML / 笔下文学逐章 HTML + CSS 注入提取）。
+    if let Some(provider) = crate::provider::owner_of(book_id) {
+        return provider.download_into_manager(
             config,
             book_id,
             book_name,
@@ -865,6 +850,15 @@ fn log_failed_chapter(chapter: &ChapterRef, reason: &str) {
 
 pub(crate) const MIN_DYNAMIC_GROUP_SIZE: usize = 15;
 pub(crate) const MAX_DYNAMIC_GROUP_SIZE: usize = 25;
+
+/// 固定大小分组：外部源按各自并发度自行切片，小分片才能让 worker 真正并行
+/// （`build_dynamic_chapter_groups` 的 15~25 章/组会限制并发利用率）。
+pub(crate) fn chunk_chapters(chapters: &[ChapterRef], size: usize) -> Vec<&[ChapterRef]> {
+    if size == 0 || chapters.is_empty() {
+        return Vec::new();
+    }
+    chapters.chunks(size).collect()
+}
 
 pub(crate) fn build_dynamic_chapter_groups(chapters: &[ChapterRef]) -> Vec<&[ChapterRef]> {
     if chapters.is_empty() {

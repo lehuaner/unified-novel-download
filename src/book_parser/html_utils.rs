@@ -182,6 +182,8 @@ fn strip_script_and_style_blocks(html: &str) -> String {
                 }
             }
 
+            // 不变量：`lower` 用 to_ascii_lowercase()（字节等长），`i` 只会停在 char
+            // 边界（步进 close_pos+len 或 ch.len_utf8()），且 i < len，故 next() 必为 Some。
             let ch = input[i..].chars().next().unwrap();
             out.push(ch);
             i += ch.len_utf8();

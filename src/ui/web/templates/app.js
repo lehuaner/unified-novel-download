@@ -261,13 +261,109 @@ function coverSrc(url) {
   return '';
 }
 
-function sourceBadge(bidStr) {
+// 书籍展示平台本地映射：搜索时记住 book_id → display_platform，
+// 让任务卡/下载库在没有后端字段时也能显示正确的平台图标（资源站不再露出）。
+const BOOK_PLATFORM_KEY = 'tnd.book_platform';
+function rememberBookPlatform(bookId, displayPlatform) {
+  const bid = String(bookId ?? '').trim();
+  const dp = String(displayPlatform ?? '').trim();
+  if (!bid || !dp) return;
+  try {
+    const m = JSON.parse(localStorage.getItem(BOOK_PLATFORM_KEY) || '{}') || {};
+    if (m[bid] === dp) return;
+    m[bid] = dp;
+    localStorage.setItem(BOOK_PLATFORM_KEY, JSON.stringify(m));
+  } catch {}
+}
+function platformForBook(bookId) {
+  try {
+    const m = JSON.parse(localStorage.getItem(BOOK_PLATFORM_KEY) || '{}') || {};
+    return String(m[String(bookId ?? '').trim()] || '');
+  } catch { return ''; }
+}
+
+// 来源徽章：优先使用后端标注的 display_platform（晋江/其他），其次本地映射，
+// 最后按 book_id 前缀回退。资源站前缀（zs:/bx:）不再作为平台展示。
+function sourceBadge(bidStr, displayPlatform) {
   const s = (bidStr ?? '').toString();
+  const dp = (displayPlatform || platformForBook(s) || '').toString();
+  if (dp === 'jinjiang') return { text: '晋江', cls: 'tag-green', icon: '/assets/jjwxc.png?v=3' };
+  if (dp === 'other') return { text: '其他', cls: '', icon: '/assets/other.png?v=3' };
+  if (dp === 'shuqi') return { text: '书旗', cls: 'tag-blue', icon: '/assets/sqnovel.png' };
+  if (dp === 'qimao') return { text: '七猫', cls: 'tag-orange', icon: '/assets/qmnovel.webp' };
+  if (dp === 'fanqie') return { text: '番茄', cls: 'tag-green', icon: '/assets/fqnovel.webp' };
   if (s.startsWith('sq:')) return { text: '书旗', cls: 'tag-blue', icon: '/assets/sqnovel.png' };
   if (s.startsWith('qm:')) return { text: '七猫', cls: 'tag-orange', icon: '/assets/qmnovel.webp' };
+  if (s.startsWith('zs:') || s.startsWith('bx:') || s.startsWith('gs:')
+      || s.startsWith('bb:') || s.startsWith('bg:') || s.startsWith('dt:')) {
+    return { text: '其他', cls: '', icon: '/assets/other.png?v=3' };
+  }
   return { text: '番茄', cls: 'tag-green', icon: '/assets/fqnovel.webp' };
 }
 
+// 懒加载详情封面：资源站搜索页往往没有封面，卡片进入视口后按 book_id 拉一次详情取封面。
+// 全局最多 3 个并发，同一 book_id 只尝试一次；失败保持首字占位。
+const lazyCoverDone = new Set();
+const lazyCoverQueue = [];
+let lazyCoverActive = 0;
+let lazyCoverObserver = null;
+
+function observeLazyCovers() {
+  const items = Array.from(document.querySelectorAll('.cover-failed[data-cover-book], .cover-failed[data-official-id]'));
+  if (!items.length) return;
+  if (!('IntersectionObserver' in window)) {
+    for (const el of items) enqueueLazyCover(el);
+    return;
+  }
+  if (!lazyCoverObserver) {
+    lazyCoverObserver = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        lazyCoverObserver.unobserve(e.target);
+        enqueueLazyCover(e.target);
+      }
+    }, { rootMargin: '240px' });
+  }
+  for (const el of items) {
+    if (el.dataset.coverQueued || el.dataset.coverDone) continue;
+    el.dataset.coverQueued = '1';
+    lazyCoverObserver.observe(el);
+  }
+}
+
+function enqueueLazyCover(el) {
+  const officialId = el.getAttribute('data-official-id') || '';
+  const bookId = el.getAttribute('data-cover-book') || '';
+  const key = officialId ? `o:${officialId}` : (bookId ? `b:${bookId}` : '');
+  if (!key || el.dataset.coverDone || lazyCoverDone.has(key)) return;
+  el.dataset.coverDone = '1';
+  lazyCoverDone.add(key);
+  lazyCoverQueue.push({ el, officialId, bookId });
+  pumpLazyCovers();
+}
+
+function pumpLazyCovers() {
+  while (lazyCoverActive < 3 && lazyCoverQueue.length) {
+    const job = lazyCoverQueue.shift();
+    lazyCoverActive++;
+    const img = new Image();
+    img.className = 'book-card-cover';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.onload = () => {
+      lazyCoverActive--;
+      if (job.el.isConnected) job.el.replaceWith(img);
+      pumpLazyCovers();
+    };
+    img.onerror = () => {
+      lazyCoverActive--;
+      pumpLazyCovers();
+    };
+    img.src = job.officialId
+      ? `/api/official-cover?official_id=${encodeURIComponent(job.officialId)}`
+      : `/api/book-cover?book_id=${encodeURIComponent(job.bookId)}`;
+  }
+}
 // 封面加载失败时用首字占位块替换。
 function bookCoverError(el) {
   const d = document.createElement('div');
@@ -288,7 +384,7 @@ function bookCard(o) {
   const initial = esc((o.title || '?').toString().trim().slice(0, 1) || '?');
   const coverHtml = cs
     ? `<img class="book-card-cover" src="${esc(cs)}" alt="" loading="lazy" data-initial="${initial}" onerror="bookCoverError(this)">`
-    : `<div class="book-card-cover cover-failed">${initial}</div>`;
+    : `<div class="book-card-cover cover-failed"${o.coverOfficialId ? ` data-official-id="${esc(o.coverOfficialId)}"` : (o.coverBookId ? ` data-cover-book="${esc(o.coverBookId)}"` : '')}>${initial}</div>`;
   const coverFormat = o.coverFormat ? `<span class="cover-format-badge">${esc(o.coverFormat)}</span>` : '';
   const coverBox = `<div class="book-card-cover-box"><span class="cover-media">${coverHtml}${coverFormat}</span><span class="cover-badge-down">${o.coverBadgeDown || ''}</span>${o.coverBadge || ''}</div>`;
   const hasScore = o.score != null && o.score !== '' && !isNaN(Number(o.score));
@@ -361,9 +457,10 @@ function searchCardMeta(b) {
 // ── 搜索工具栏：分类 tab + 筛选器 + 分页（均为无状态单请求）─────────────
 // 搜索源注册表：新增一个源只改这里，其余逻辑均由数组推导，不再处处字面量。
 const PROVIDER_REGISTRY = [
-  { name: 'fanqie', label: '番茄', prefix: '' },
-  { name: 'shuqi',  label: '书旗', prefix: 'sq:' },
-  { name: 'qimao',  label: '七猫', prefix: 'qm:' },
+  { name: 'fanqie',   label: '番茄', prefix: '' },
+  { name: 'shuqi',    label: '书旗', prefix: 'sq:' },
+  { name: 'qimao',    label: '七猫', prefix: 'qm:' },
+  { name: 'jinjiang', label: '晋江', prefix: 'jj:' },
 ];
 const PROVIDER_ORDER = PROVIDER_REGISTRY.map(p => p.name);
 const PROVIDER_LABELS = Object.fromEntries(PROVIDER_REGISTRY.map(p => [p.name, p.label]));
@@ -554,6 +651,8 @@ const CONTENT_KIND_LABELS = { audio: '听书', video: '短剧/漫剧' };
 
 function bookCardFrom(b, q) {
   const bidStr = String(b.book_id ?? '');
+  rememberBookPlatform(bidStr, b.display_platform);
+  rememberPreviewGroup(b);
   // 标签：接口原字段直显（书旗 cornerTagExt 的原创/独家 + tags，番茄 tags），
   // 位置对齐其他源——放作者下方的 meta 行，标题行只留来源图标。
   const cat = (b.category || '').toString().trim();
@@ -571,13 +670,15 @@ function bookCardFrom(b, q) {
       const key = typeof t === 'object' ? t.text : t;
       return key && !seen.has(key) && seen.add(key);
     });
+  const sourceCount = Number(b.source_count) || 0;
+  if (sourceCount > 1) tagChips.push({ text: `${sourceCount} 个下载源`, cls: 'tag-kind' });
   return bookCard({
     query: q, cover: b.cover_url, title: b.title || bidStr, author: b.author,
     desc: b.description, score: b.score, meta: searchCardMeta(b),
     displayTitle: b.display_title, official: !!b.official_highlight,
     tagChips,
-    badges: [sourceBadge(bidStr)],
-    bookId: bidStr, scoreInFoot: true,
+    badges: [sourceBadge(bidStr, b.display_platform)],
+    bookId: bidStr, coverBookId: bidStr, coverOfficialId: b.official_id, scoreInFoot: true,
     foot: `<code class="book-card-id" title="Book ID">${esc(bidStr)}</code>`,
   });
 }
@@ -752,24 +853,29 @@ async function refreshTab() {
         url = `/api/search?q=${encodeURIComponent(s.q)}&provider=fanqie&tab=${s.tab || 1}&selected_items=${encodeURIComponent(sel)}&offset=0`;
       } else if (name === 'qimao') {
         url = `/api/search?q=${encodeURIComponent(s.q)}&provider=qimao&tab=${s.tab || 1}&selected_items=${encodeURIComponent(sel)}&page=1`;
-      } else {
+      } else if (name === 'shuqi') {
         url = `/api/search?q=${encodeURIComponent(s.q)}&provider=shuqi&page=1`;
+      } else if (name === 'jinjiang') {
+        // 晋江：后端会同时搜索官方源 + 平台池（姿势吧/笔下文学），并完成归属判定。
+        url = `/api/search?q=${encodeURIComponent(s.q)}&provider=jinjiang&page=1`;
+      } else {
+        continue;
       }
       tasks.push((async () => {
         try {
           const data = await j(url);
           const items = data.items || [];
-          for (const it of items) it._provider = name;
+          // 后端已按 display_platform 标注 `_provider`（晋江/其他归入晋江），不要覆盖。
+          for (const it of items) {
+            if (!it._provider) it._provider = it.display_platform || name;
+            rememberBookPlatform(it.book_id, it.display_platform);
+          }
           searchProviderCache[name] = items;
           absorbProviderMeta(name, data);
           const phm = data.provider_has_more && data.provider_has_more[name];
-          if (name === 'fanqie') {
-            providerPages.fanqie = { hasMore: phm != null ? !!phm : !!data.has_more, nextOffset: data.next_offset || 0 };
-          } else if (name === 'qimao') {
-            providerPages.qimao = { hasMore: phm != null ? !!phm : false, page: 1 };
-          } else {
-            providerPages.shuqi = { hasMore: phm != null ? !!phm : false, page: 1 };
-          }
+          providerPages[name] = name === 'fanqie'
+            ? { hasMore: phm != null ? !!phm : !!data.has_more, nextOffset: data.next_offset || 0 }
+            : { hasMore: phm != null ? !!phm : false, page: 1 };
         } catch {
           searchProviderCache[name] = [];
           providerPages[name] = { hasMore: false, page: 1 };
@@ -896,6 +1002,66 @@ function parseBookId(input) {
     }
   } catch (_) { /* not a URL */ }
 
+  // 姿势吧（zishiba）：zs: 前缀或 zishiba.com 书籍/章节页 URL
+  if (/^zs:[0-9]+$/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (/(^|\.)zishiba\.com$/.test(parsed.hostname.toLowerCase())) {
+      const bid = (parsed.pathname.match(/\/book\/(\d+)/i) || [])[1];
+      if (bid) return 'zs:' + bid;
+    }
+  } catch (_) { /* not a URL */ }
+
+  // 笔下文学（hen0）：bx: 前缀或 hen0.com 书籍/章节页 URL
+  if (/^bx:[0-9]+$/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (/(^|\.)hen0\.com$/.test(parsed.hostname.toLowerCase())) {
+      const bid = (parsed.pathname.match(/\/book\/(\d+)/i) || [])[1];
+      if (bid) return 'bx:' + bid;
+    }
+  } catch (_) { /* not a URL */ }
+
+  // 官术网（guanshuya）：gs: 前缀或 guanshuya.net 书籍/章节页 URL
+  if (/^gs:[0-9]+$/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (/(^|\.)guanshuya\.net$/.test(parsed.hostname.toLowerCase())) {
+      const bid = (parsed.pathname.match(/\/html\/\d+\/(\d+)(?:\/|_|$)/i) || [])[1];
+      if (bid) return 'gs:' + bid;
+    }
+  } catch (_) { /* not a URL */ }
+
+  // 笔趣阁（biqubee）：bb: 前缀或 biqubee.com 书籍/章节页 URL
+  if (/^bb:[0-9]+$/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (/(^|\.)biqubee\.com$/.test(parsed.hostname.toLowerCase())) {
+      const bid = (parsed.pathname.match(/\/bi_(\d+)(?:\/|$)/i) || [])[1];
+      if (bid) return 'bb:' + bid;
+    }
+  } catch (_) { /* not a URL */ }
+
+  // 笔趣阁二站（biquga）：bg: 前缀或 biquga.com 书籍/章节页 URL
+  if (/^bg:[0-9]+_[0-9]+$/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (/(^|\.)biquga\.com$/.test(parsed.hostname.toLowerCase())) {
+      const bid = (parsed.pathname.match(/\/(\d+_\d+)(?:\/|$)/i) || [])[1];
+      if (bid) return 'bg:' + bid;
+    }
+  } catch (_) { /* not a URL */ }
+
+  // 东滩小说（dongtan）：dt: 前缀或 dongtanxs.com 书籍/章节页 URL
+  if (/^dt:[0-9]+$/i.test(trimmed)) return trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    if (/(^|\.)dongtanxs\.com$/.test(parsed.hostname.toLowerCase())) {
+      const bid = (parsed.pathname.match(/\/(?:dongtan|dong)(\d+)\//i) || [])[1];
+      if (bid) return 'dt:' + bid;
+    }
+  } catch (_) { /* not a URL */ }
+
   const urlMatch = trimmed.match(/https?:\/\/\S+/i);
   const target = urlMatch ? urlMatch[0] : trimmed;
 
@@ -942,9 +1108,11 @@ function isLikelyHeicUrl(url) {
 function buildCoverCandidates(preview, hintCoverUrl) {
   const list = [];
   const add = (u) => {
-    const v = (u || '').toString().trim();
+    const raw = (u || '').toString().trim();
+    if (!raw) return;
+    // 外链封面统一走本地代理（晋江 CDN 会拒绝站外 Referer）。
+    const v = coverSrc(raw);
     if (!v) return;
-    if (!(v.startsWith('http://') || v.startsWith('https://') || v.startsWith('/'))) return;
     if (!list.includes(v)) list.push(v);
   };
 
@@ -1220,64 +1388,109 @@ async function doSearch(q) {
   }
   const providers = chosen;
   const totalProviders = providers.length;
-  let completedProviders = 0;
-  let allItems = [];
   const counts = {}; // name -> {label, count, failed}
   providers.forEach(p => { counts[p.name] = { label: p.label, count: 0, failed: false }; });
 
   showProgress(`搜索中... 已完成 0/${totalProviders} 个源`);
   document.getElementById('searchCounts')?.classList.add('hidden');
 
-  // 并发请求各搜索源（各源响应里的 provider_meta 逐源吸收进能力缓存）
-  const promises = providers.map(async (p) => {
-    try {
-      const data = await j(`/api/search?q=${encodeURIComponent(q)}&provider=${p.name}`);
-      const items = data.items || [];
-      for (const it of items) it._provider = p.name;
-      searchProviderCache[p.name] = items;
-      absorbProviderMeta(p.name, data);
-      const phm = data.provider_has_more && data.provider_has_more[p.name];
-      providerPages[p.name] = p.name === 'fanqie'
-        ? { hasMore: phm != null ? !!phm : !!data.has_more, nextOffset: data.next_offset || 0 }
-        : { hasMore: phm != null ? !!phm : false, page: 1 };
-      completedProviders++;
-      counts[p.name].count = items.length;
-      showProgress(`搜索中... 已完成 ${completedProviders}/${totalProviders} 个源（${p.label} ${items.length} 条）`);
-      return items;
-    } catch (err) {
-      completedProviders++;
-      counts[p.name].failed = true;
-      showProgress(`搜索中... 已完成 ${completedProviders}/${totalProviders} 个源（${p.label} 失败）`);
-      return [];
+  // 分两路并发：番茄单独一路，其余源（含晋江聚合）另一路。
+  // 口径：番茄一返回就渲染当前已到达的结果（番茄是时间上限），其余源后台继续、
+  // 完成后再增量合并显示，绝不阻塞搜索框。
+  const appliedWarnings = [];
+  const absorbGroup = (data, group) => {
+    const items = data.items || [];
+    for (const p of group) searchProviderCache[p.name] = searchProviderCache[p.name] || [];
+    for (const it of items) {
+      const key = String(it._provider || it.display_platform || 'fanqie');
+      it._provider = key;
+      (searchProviderCache[key] || (searchProviderCache[key] = [])).push(it);
+      rememberBookPlatform(it.book_id, it.display_platform);
     }
-  });
+    for (const p of group) absorbProviderMeta(p.name, data);
+    const phm = data.provider_has_more || {};
+    for (const p of group) {
+      providerPages[p.name] = p.name === 'fanqie'
+        ? { hasMore: phm.fanqie != null ? !!phm.fanqie : !!data.has_more, nextOffset: data.next_offset || 0 }
+        : { hasMore: phm[p.name] != null ? !!phm[p.name] : false, page: 1 };
+    }
+    if (Array.isArray(data.warnings)) appliedWarnings.push(...data.warnings);
+  };
 
-  const results = await Promise.all(promises);
-  for (const items of results) {
-    allItems = allItems.concat(items);
-  }
-  sortResultsByRelevance(allItems, q);
+  const fetchGroup = async (group) => {
+    if (!group.length) return;
+    const names = group.map(p => p.name).join(',');
+    try {
+      const data = await j(`/api/search?q=${encodeURIComponent(q)}&providers=${encodeURIComponent(names)}`);
+      absorbGroup(data, group);
+    } catch {
+      for (const p of group) {
+        searchProviderCache[p.name] = [];
+        counts[p.name].failed = true;
+      }
+    }
+  };
 
-  hideProgress();
-  renderSearchCounts(counts);
-
-  if (allItems.length === 0) {
-    out.innerHTML = '<div class="grid-empty">无结果</div>';
+  // 从当前各源缓存合并渲染（可重复调用，用于“番茄先显示 / 其他源后补显”）。
+  const renderNow = () => {
+    let items = [];
+    const live = {};
+    for (const p of providers) {
+      const arr = searchProviderCache[p.name] || [];
+      items = items.concat(arr);
+      live[p.name] = { label: p.label, count: 0, failed: !!counts[p.name].failed };
+      for (const it of arr) bumpPlatformCount(live, platformCountKey(it, p.name));
+    }
+    sortResultsByRelevance(items, q);
+    out.innerHTML = items.length
+      ? items.map(b => bookCardFrom(b, q)).join('')
+      : '<div class="grid-empty">无结果</div>';
     out.classList.remove('hidden');
-    setListHeadVisible(false);
-    return;
+    setListHeadVisible(items.length > 0);
+    renderSearchCounts(live);
+    if (searchState) searchState.items = items;
+    ensureToolbarBound();
+    syncToolbar();
+    refreshMoreButton();
+    observeLazyCovers();
+    return items;
+  };
+
+  const fanqieProvider = providers.find(p => p.name === 'fanqie');
+  const restProviders = providers.filter(p => p.name !== 'fanqie');
+  // 未勾选番茄时就没有“番茄触发点”，其他源完成即渲染。
+  let fanqieDone = !fanqieProvider;
+
+  // 番茄优先：它一返回就立刻渲染，不等其他源。
+  const fanqieTask = (async () => {
+    if (!fanqieProvider) return;
+    await fetchGroup([fanqieProvider]);
+    fanqieDone = true;
+    renderNow();
+    if (restProviders.length) {
+      showProgress('番茄结果已显示，其他源后台加载中...');
+    } else {
+      hideProgress();
+    }
+  })();
+
+  // 其他源：与番茄并发，后台继续；番茄未返回时**只缓存不渲染**，
+  // 等番茄返回后由 fanqieTask 统一把“番茄 + 已完成其他源”一次性显示。
+  const restTask = (async () => {
+    if (!restProviders.length) return;
+    await fetchGroup(restProviders);
+    if (fanqieDone) {
+      renderNow();
+      hideProgress();
+    }
+  })();
+
+  await Promise.allSettled([fanqieTask, restTask]);
+  renderNow();
+  hideProgress();
+  if (appliedWarnings.length) {
+    showSearchHint(appliedWarnings.join('；'), 3600);
   }
-  out.innerHTML = allItems.map(b => bookCardFrom(b, q)).join('');
-  out.classList.remove('hidden');
-  setListHeadVisible(allItems.length > 0);
-  ensureToolbarBound();
-  // 工具栏由「当前勾选源的能力并集」重建：哪个源自报了分类/筛选就显示哪个的，
-  // 都没自报（如仅书旗）则整个工具栏隐藏。
-  syncToolbar();
-  // 合并模式下把当前结果种入 searchState.items，使“加载更多”能在其后
-  // 追加下一页（refreshTab 依赖 s.items 累积），而非整体替换。
-  if (searchState) searchState.items = allItems;
-  refreshMoreButton();
 }
 
 // 搜索源选中集合（来自 #providerFilter 复选框）。
@@ -1301,7 +1514,8 @@ function renderMergedResults(q) {
     if (!sel.has(p)) continue;
     const arr = searchProviderCache[p] || [];
     items = items.concat(arr);
-    counts[p] = { label: labels[p], count: arr.length, failed: false };
+    counts[p] = { label: labels[p], count: 0, failed: false };
+    for (const it of arr) bumpPlatformCount(counts, platformCountKey(it, p));
   }
   sortResultsByRelevance(items, q);
   out.innerHTML = items.length
@@ -1316,20 +1530,41 @@ function renderMergedResults(q) {
   const hasModel = searchState && (((searchState.tabs || []).length > 1) || (searchState.rows || []).length > 0);
   if (tb) tb.classList.toggle('hidden', !((cbSel.has('fanqie') || cbSel.has('qimao')) && hasModel));
   refreshMoreButton();
+  observeLazyCovers();
 }
+
+// 平台数量按“展示平台”统计：晋江搜索里未判定为晋江的条目单独计入“其他”，
+// 不再混进晋江数量（_provider 仅用于结果缓存/平台筛选归属）。
+function platformCountKey(it, fallback) {
+  const dp = String((it && it.display_platform) || '').trim().toLowerCase();
+  if (dp === 'other') return 'other';
+  return String(fallback || (it && it._provider) || dp || 'fanqie');
+}
+function bumpPlatformCount(counts, key) {
+  if (!counts[key]) counts[key] = { label: COUNT_LABELS[key] || key, count: 0, failed: false };
+  counts[key].count++;
+}
+
+const COUNT_ICONS = {
+  fanqie: '/assets/fqnovel.webp',
+  shuqi: '/assets/sqnovel.png',
+  qimao: '/assets/qmnovel.webp',
+  jinjiang: '/assets/jjwxc.png?v=3',
+  other: '/assets/other.png',
+};
+const COUNT_LABELS = { fanqie: '番茄', shuqi: '书旗', qimao: '七猫', jinjiang: '晋江', other: '其他' };
 
 // 各源搜索数量展示。
 function renderSearchCounts(counts) {
   const el = document.getElementById('searchCounts');
   if (!el) return;
-  const iconOf = { fanqie: '/assets/fqnovel.webp', shuqi: '/assets/sqnovel.png', qimao: '/assets/qmnovel.webp' };
-  const labelOf = { fanqie: '番茄', shuqi: '书旗', qimao: '七猫' };
   const parts = Object.entries(counts).map(([k, c]) => {
     const n = c.failed ? '—' : c.count;
-    const ico = iconOf[k];
+    const ico = COUNT_ICONS[k];
+    const label = COUNT_LABELS[k] || c.label || k;
     const lead = ico
-      ? `<img class="count-ico" src="${ico}" alt="${esc(labelOf[k] || '')}" title="${esc(labelOf[k] || k)}">`
-      : `<span>${esc(c.label || k)}</span>`;
+      ? `<img class="count-ico" src="${ico}" alt="${esc(label)}" title="${esc(label)}">`
+      : `<span>${esc(label)}</span>`;
     return `<span class="count-item">${lead}<span>${n}</span></span>`;
   });
   el.innerHTML = parts.join('<span class="count-sep">·</span>');
@@ -1472,6 +1707,99 @@ let currentPreviewData = null;
 let currentPreviewCoverUrl = null;
 let previewRequestSerial = 0;
 let previewAbortController = null;
+let currentPreviewGroup = null;
+const previewSourceGroups = new Map();
+// 详情预取：卡片悬停时提前拉取 /api/preview，点击时直接命中 localStorage 缓存。
+const previewPrefetchState = new Set();
+function prefetchPreview(bookId, hintTitle) {
+  const id = String(bookId || '').trim();
+  if (!id || getPreviewCache(id) || previewPrefetchState.has(id)) return;
+  previewPrefetchState.add(id);
+  const qs = hintTitle ? `?hint_title=${encodeURIComponent(hintTitle)}` : '';
+  j(`/api/preview/${encodeURIComponent(id)}${qs}`)
+    .then(pv => { if (pv) setPreviewCache(pv.book_id || id, pv); })
+    .catch(() => {})
+    .finally(() => previewPrefetchState.delete(id));
+}
+
+function prefetchGroupSources(group, activeBookId) {
+  if (!group || !Array.isArray(group.sources)) return;
+  const title = (group.item && group.item.title) || '';
+  for (const s of group.sources) {
+    if (String(s.book_id) !== String(activeBookId)) prefetchPreview(s.book_id, title);
+  }
+}
+
+// 记住搜索结果里「同一本官网书 + 多个下载源」的分组，供详情页标签切换。
+function rememberPreviewGroup(b) {
+  if (!b || !Array.isArray(b.download_sources)) return;
+  const sources = b.download_sources.filter(s => s && s.book_id);
+  if (!sources.length) return;
+  const group = { sources, item: b };
+  const keys = [b.book_id, ...sources.map(s => s.book_id)].filter(Boolean);
+  for (const k of keys) previewSourceGroups.set(String(k), group);
+}
+
+function renderPreviewSourceTabs(group, activeId) {
+  const el = document.getElementById('previewSourceTabs');
+  if (!el) return;
+  if (!group || !group.sources || !group.sources.length) {
+    el.innerHTML = '';
+    el.classList.add('hidden');
+    return;
+  }
+  const item = group.item || {};
+  const tabs = [{ id: '__official__', label: '官网', title: item.official_url || '晋江官网信息' }];
+  for (const s of group.sources) {
+    const score = Number(s.matched_score);
+    const scoreText = Number.isFinite(score) ? ` · ${score.toFixed(2)}` : '';
+    tabs.push({
+      id: String(s.book_id),
+      label: `${s.site_name || s.site || String(s.book_id)}${scoreText}`,
+      title: `${s.site_name || s.site || ''} · 匹配度 ${s.matched_score ?? ''}`.trim(),
+    });
+  }
+  const active = String(activeId ?? '');
+  el.innerHTML = tabs.map(t => {
+    const isActive = String(t.id) === active;
+    const cls = `preview-source-tab${t.id === '__official__' ? ' official' : ''}${isActive ? ' active' : ''}`;
+    return `<button type="button" class="${cls}" data-source-id="${esc(t.id)}" title="${esc(t.title)}">${esc(t.label)}</button>`;
+  }).join('');
+  el.classList.remove('hidden');
+}
+
+// 官网标签：只展示官网信息，不提供下载。
+function renderOfficialPreview(group) {
+  const it = (group && group.item) || {};
+  if (previewAbortController) {
+    previewAbortController.abort();
+    previewAbortController = null;
+  }
+  const serial = ++previewRequestSerial;
+  currentPreviewBookId = null;
+  currentPreviewCoverUrl = it.cover_url || null;
+  const official = {
+    book_id: it.official_id || '',
+    book_name: it.title || '',
+    author: it.author || '',
+    description: it.description || '',
+    tags: Array.isArray(it.tags) ? it.tags : [],
+    cover_url: it.cover_url || '',
+    detail_cover_url: it.cover_url || '',
+    finished: it.finished,
+    chapter_count: it.chapter_count,
+    word_count: it.word_count,
+    score: it.score,
+    category: it.category,
+    read_count: null,
+    read_count_text: null,
+    official_only: true,
+    meta_missing: false,
+  };
+  currentPreviewData = official;
+  applyPreview(official, official.cover_url, serial, '', false);
+  renderPreviewSourceTabs(group, '__official__');
+}
 
 function showPreviewModal(show) {
   const modal = document.getElementById('previewModal');
@@ -1493,6 +1821,9 @@ function showPreviewModal(show) {
     }
     currentPreviewBookId = null;
     currentPreviewData = null;
+    currentPreviewGroup = null;
+    const tabs = document.getElementById('previewSourceTabs');
+    if (tabs) { tabs.innerHTML = ''; tabs.classList.add('hidden'); }
   }
 }
 
@@ -1522,7 +1853,7 @@ function setPreviewCache(bookId, data) {
 // 用于番茄网页详情页 404 时保留“用户看到的名字”（响应会标 book_name_from_hint）。
 let currentPreviewHintTitle = null;
 
-async function openPreview(bookId, hintCoverUrl, force, hintTitle) {
+async function openPreview(bookId, hintCoverUrl, force, hintTitle, group) {
   if (previewAbortController) previewAbortController.abort();
   const requestSerial = ++previewRequestSerial;
   const abortController = new AbortController();
@@ -1531,7 +1862,10 @@ async function openPreview(bookId, hintCoverUrl, force, hintTitle) {
   currentPreviewData = null;
   currentPreviewCoverUrl = (hintCoverUrl || '').toString() || null;
   currentPreviewHintTitle = (hintTitle || '').toString() || null;
+  currentPreviewGroup = group || previewSourceGroups.get(String(bookId)) || null;
   showPreviewModal(true);
+  // 同一本书多下载源：详情页顶部生成「官网 / 下载源1 / 下载源2」切换导航。
+  renderPreviewSourceTabs(currentPreviewGroup, bookId);
 
   const loading = document.getElementById('previewLoading');
   const rangeInput = document.getElementById('previewRangeInput');
@@ -1544,6 +1878,7 @@ async function openPreview(bookId, hintCoverUrl, force, hintTitle) {
   if (cached && cached.data) {
     currentPreviewData = cached.data;
     applyPreview(cached.data, hintCoverUrl, requestSerial, bookId, true);
+    prefetchGroupSources(currentPreviewGroup, bookId);
     if (loading) loading.classList.add('hidden');
   } else {
     if (loading) { loading.textContent = '加载中...'; loading.classList.remove('hidden'); }
@@ -1563,6 +1898,8 @@ async function openPreview(bookId, hintCoverUrl, force, hintTitle) {
     currentPreviewData = preview;
     if (preview.book_id) currentPreviewBookId = preview.book_id;
     applyPreview(preview, hintCoverUrl, requestSerial, bookId, false);
+    renderPreviewSourceTabs(currentPreviewGroup, currentPreviewBookId || bookId);
+    prefetchGroupSources(currentPreviewGroup, currentPreviewBookId || bookId);
     // 预览过一次→写入缓存；同时自动补档（若之前无有效存档）。
     setPreviewCache(preview.book_id || bookId, preview);
     fetchWithCreds(`/api/preview/${encodeURIComponent(preview.book_id || bookId)}/archive`, { method: 'POST' })
@@ -1611,7 +1948,10 @@ function applyPreview(preview, hintCoverUrl, requestSerial, bookId, fromCache) {
   // 避免声称“封面不可用”却把封面正常显示出来这种归属错误。
   const warn = document.getElementById('previewMetaWarn');
   if (warn) {
-    if (preview.meta_missing) {
+    if (preview.official_only) {
+      warn.textContent = '当前为晋江官网信息（仅供查看）；请切换到下载源后下载。';
+      warn.classList.remove('hidden');
+    } else if (preview.meta_missing) {
       const miss = [];
       if (!preview.author) miss.push('作者');
       if (!preview.description) miss.push('简介');
@@ -1730,13 +2070,24 @@ function applyPreview(preview, hintCoverUrl, requestSerial, bookId, fromCache) {
   // 若该书有可更新内容，确认按钮文案改为“确认更新”。
   const confirmBtn = document.getElementById('previewConfirm');
   if (confirmBtn) {
-    const pbid = String((preview && preview.book_id) || bookId || '');
-    const hit = (libraryBooksCache || []).find(x => String(x.book_id) === pbid);
-    confirmBtn.textContent = (hit && Number(hit.new_count) > 0) ? '确认更新' : '确认下载';
+    const officialOnly = !!preview.official_only;
+    confirmBtn.disabled = officialOnly;
+    if (officialOnly) {
+      confirmBtn.textContent = '官网不提供下载';
+    } else {
+      const pbid = String((preview && preview.book_id) || bookId || '');
+      const hit = (libraryBooksCache || []).find(x => String(x.book_id) === pbid);
+      confirmBtn.textContent = (hit && Number(hit.new_count) > 0) ? '确认更新' : '确认下载';
+    }
   }
 }
 
 async function confirmPreview() {
+  if (currentPreviewData && currentPreviewData.official_only) {
+    const hint = document.getElementById('searchHint');
+    if (hint) hint.textContent = '当前为晋江官网信息，请切换到下载源后再下载';
+    return;
+  }
   if (!currentPreviewBookId || !currentPreviewData) { showPreviewModal(false); return; }
 
   const bookId = currentPreviewBookId;
@@ -2131,13 +2482,16 @@ function wire() {
   if (clearHistBtn) clearHistBtn.addEventListener('click', clearSearchHistory);
 
   // -- 搜索源筛选（默认全选，持久化） --
-  const PROVIDERS_KEY = 'tnd.providers';
+  // v2：平台集合从"三免费 + 两资源站"迁移为"四平台（含晋江）"，旧键不再读取。
+  const PROVIDERS_KEY = 'tnd.providers.v2';
   const providerBox = document.getElementById('providerFilter');
   if (providerBox) {
     let saved;
     try { const a = JSON.parse(localStorage.getItem(PROVIDERS_KEY)); saved = Array.isArray(a) ? new Set(a) : null; }
     catch { saved = null; }
-    if (!saved) saved = new Set(['fanqie', 'shuqi', 'qimao']);
+    if (!saved) saved = new Set(PROVIDER_ORDER);
+    else saved = new Set([...saved].filter(v => PROVIDER_ORDER.includes(v)));
+    if (saved.size === 0) saved = new Set(PROVIDER_ORDER);
     providerBox.querySelectorAll('input[type=checkbox]').forEach(cb => {
       cb.checked = saved.has(cb.value);
       cb.closest('label')?.classList.toggle('checked', cb.checked);
@@ -2195,6 +2549,26 @@ function wire() {
   }
 
   // -- Delegated Click Handlers --
+  // 卡片悬停预取详情（150ms 防抖），点击时优先命中本地缓存。
+  let previewHoverTimer = null;
+  document.addEventListener('mouseover', (e) => {
+    const card = e.target.closest ? e.target.closest('.book-card[data-bookid]') : null;
+    if (!card) return;
+    const id = card.getAttribute('data-bookid');
+    if (!id) return;
+    clearTimeout(previewHoverTimer);
+    previewHoverTimer = setTimeout(
+      () => prefetchPreview(id, card.getAttribute('data-title') || ''),
+      150
+    );
+  });
+  document.addEventListener('mouseout', (e) => {
+    const card = e.target.closest ? e.target.closest('.book-card[data-bookid]') : null;
+    if (!card) return;
+    const to = e.relatedTarget;
+    if (to && card.contains(to)) return;
+    clearTimeout(previewHoverTimer);
+  });
   document.addEventListener('click', async (e) => {
     const t = e.target;
     if (!t || !t.classList) return;
@@ -2323,6 +2697,28 @@ function wire() {
     try { await confirmPreview(); } catch (err) { alert(err); }
   });
 
+  // 详情页下载源切换：官网 / 下载源1 / 下载源2 ...
+  const previewTabsEl = document.getElementById('previewSourceTabs');
+  if (previewTabsEl) previewTabsEl.addEventListener('click', async (e) => {
+    const btn = e.target.closest ? e.target.closest('.preview-source-tab') : null;
+    if (!btn) return;
+    const id = btn.getAttribute('data-source-id');
+    const group = currentPreviewGroup;
+    if (!group) return;
+    if (id === '__official__') { renderOfficialPreview(group); return; }
+    const src = (group.sources || []).find(s => String(s.book_id) === id);
+    if (!src) return;
+    try {
+      await openPreview(
+        src.book_id,
+        src.cover_url || '',
+        false,
+        (group.item && group.item.title) || '',
+        group
+      );
+    } catch (err) { alert(err); }
+  });
+
   const previewCancel = document.getElementById('previewCancel');
   if (previewCancel) previewCancel.addEventListener('click', () => showPreviewModal(false));
 
@@ -2406,3 +2802,10 @@ async function boot() {
 }
 
 boot().catch(err => console.error(err));
+
+
+
+
+
+
+

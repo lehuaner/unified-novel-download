@@ -27,39 +27,26 @@ pub fn prepare_download_plan(
 ) -> Result<DownloadPlan> {
     info!(target: "download", book_id, "准备下载计划（no-official）");
 
-    // 书旗（Shuqi）路由
-    #[cfg(feature = "shuqi")]
-    if crate::shuqi::is_shuqi_book_id(book_id) {
-        return crate::shuqi::prepare_shuqi_plan(config, book_id, meta_hint);
-    }
-
-    // 七猫（Qimao）路由
-    #[cfg(feature = "qimao")]
-    if crate::qimao::is_qimao_book_id(book_id) {
-        return crate::qimao::prepare_qimao_plan(config, book_id, meta_hint);
+    // 外部源路由：按注册表顺序（书旗 → 七猫 → 姿势吧 → 笔下文学）识别前缀。
+    if let Some(provider) = crate::provider::owner_of(book_id) {
+        return provider.prepare_plan(config, book_id, meta_hint);
     }
 
     match prepare_download_plan_web(config, book_id, meta_hint.clone()) {
         Ok(plan) => Ok(plan),
         Err(web_err) => {
-            // 纯数字 book_id 可能是书旗 ID，尝试书旗回退
-            #[cfg(feature = "shuqi")]
+            // 纯数字 book_id 无来源前缀，番茄 web 解析失败时按注册表尝试
+            // 允许回退的外部源（书旗/七猫；姿势吧/笔下文学 ID 无区分度，禁止回退）。
             if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
-                let shuqi_id = format!("sq:{book_id}");
-                if let Ok(plan) =
-                    crate::shuqi::prepare_shuqi_plan(config, &shuqi_id, meta_hint.clone())
-                {
-                    return Ok(plan);
-                }
-            }
-            // 纯数字 book_id 可能是七猫 ID，尝试七猫回退
-            #[cfg(feature = "qimao")]
-            if !book_id.is_empty() && book_id.chars().all(|c| c.is_ascii_digit()) {
-                let qimao_id = format!("qm:{book_id}");
-                if let Ok(plan) =
-                    crate::qimao::prepare_qimao_plan(config, &qimao_id, meta_hint.clone())
-                {
-                    return Ok(plan);
+                for provider in crate::provider::providers() {
+                    if !provider.allow_numeric_fallback() {
+                        continue;
+                    }
+                    if let Ok(plan) =
+                        provider.prepare_numeric_fallback(config, book_id, meta_hint.clone())
+                    {
+                        return Ok(plan);
+                    }
                 }
             }
             Err(web_err)

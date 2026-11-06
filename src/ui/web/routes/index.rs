@@ -69,6 +69,22 @@ pub(crate) async fn asset_icon_qmnovel() -> Response {
     icon_response(templates::ICON_QMNOVEL, "image/webp")
 }
 
+pub(crate) async fn asset_icon_zsnovel() -> Response {
+    icon_response(templates::ICON_ZSNOVEL, "image/svg+xml")
+}
+
+pub(crate) async fn asset_icon_hen0() -> Response {
+    icon_response(templates::ICON_HEN0, "image/svg+xml")
+}
+
+pub(crate) async fn asset_icon_jjwxc() -> Response {
+    icon_response(templates::ICON_JJWXC, "image/png")
+}
+
+pub(crate) async fn asset_icon_other() -> Response {
+    icon_response(templates::ICON_OTHER, "image/png")
+}
+
 fn icon_response(data: &[u8], content_type: &str) -> Response {
     let mut resp = Response::new(data.to_vec().into());
     *resp.status_mut() = StatusCode::OK;

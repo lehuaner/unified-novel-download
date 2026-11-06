@@ -53,6 +53,27 @@ pub struct Config {
     // 网络配置
     #[serde(default = "default_max_workers")]
     pub max_workers: usize,
+    /// 笔下文学（hen0）下载并发章节数。实测 4 最优；6 会被站点拒绝，故上限 4。
+    #[serde(default = "default_hen0_workers")]
+    pub hen0_workers: usize,
+    /// 官术网搜索所需 Cloudflare Cookie（浏览器 cf_clearance）。留空则官术网搜索跳过并给出提示。
+    #[serde(default = "default_string")]
+    pub guanshuya_cookie: String,
+    /// 与 Cookie 匹配的 User-Agent（不同浏览器/版本会改变 cf_clearance 绑定）。留空用内置 Edge 156 UA。
+    #[serde(default = "default_string")]
+    pub guanshuya_user_agent: String,
+    /// 官术网下载并发章节数（个人站，建议 2~4）。
+    #[serde(default = "default_guanshuya_workers")]
+    pub guanshuya_workers: usize,
+    /// 笔趣阁下载并发章节数（实测 4 线程无失败；串行 30 章约 31s，4 线程约 17s）。
+    #[serde(default = "default_biqubee_workers")]
+    pub biqubee_workers: usize,
+    /// 笔趣阁二站下载并发章节数（实测 4 线程无失败；串行 30 章约 88s，4 线程约 48s）。
+    #[serde(default = "default_biquga_workers")]
+    pub biquga_workers: usize,
+    /// 东滩小说下载并发章节数（实测 2 最优；4 会被站点限流，30 章失败 12 章）。
+    #[serde(default = "default_dongtan_workers")]
+    pub dongtan_workers: usize,
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
     #[serde(default = "default_max_retries")]
@@ -178,6 +199,13 @@ impl Default for Config {
         Self {
             old_cli: default_false(),
             max_workers: default_max_workers(),
+            hen0_workers: default_hen0_workers(),
+            guanshuya_cookie: default_string(),
+            guanshuya_user_agent: default_string(),
+            guanshuya_workers: default_guanshuya_workers(),
+            biqubee_workers: default_biqubee_workers(),
+            biquga_workers: default_biquga_workers(),
+            dongtan_workers: default_dongtan_workers(),
             request_timeout: default_request_timeout(),
             max_retries: default_max_retries(),
             max_wait_time: default_max_wait_time(),
@@ -232,7 +260,7 @@ impl ConfigSpec for Config {
     const FILE_NAME: &'static str = "config.yml";
 
     fn fields() -> &'static [FieldMeta] {
-        static FIELDS: [FieldMeta; 44] = [
+        static FIELDS: [FieldMeta; 51] = [
             FieldMeta {
                 name: "old_cli",
                 description: "是否使用老版本命令行界面",
@@ -240,6 +268,34 @@ impl ConfigSpec for Config {
             FieldMeta {
                 name: "max_workers",
                 description: "最大并发线程数",
+            },
+            FieldMeta {
+                name: "hen0_workers",
+                description: "笔下文学下载并发章节数（1~4）",
+            },
+            FieldMeta {
+                name: "guanshuya_cookie",
+                description: "官术网搜索 Cloudflare Cookie（cf_clearance），留空则搜索不可用",
+            },
+            FieldMeta {
+                name: "guanshuya_user_agent",
+                description: "与官术网 Cookie 匹配的浏览器 User-Agent",
+            },
+            FieldMeta {
+                name: "guanshuya_workers",
+                description: "官术网下载并发章节数（1~4）",
+            },
+            FieldMeta {
+                name: "biqubee_workers",
+                description: "笔趣阁下载并发章节数（1~4）",
+            },
+            FieldMeta {
+                name: "biquga_workers",
+                description: "笔趣阁二站下载并发章节数（1~4）",
+            },
+            FieldMeta {
+                name: "dongtan_workers",
+                description: "东滩小说下载并发章节数（1~2）",
             },
             FieldMeta {
                 name: "request_timeout",
@@ -1131,6 +1187,26 @@ fn default_false() -> bool {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_hen0_workers() -> usize {
+    4
+}
+
+fn default_guanshuya_workers() -> usize {
+    4
+}
+
+fn default_biqubee_workers() -> usize {
+    4
+}
+
+fn default_biquga_workers() -> usize {
+    4
+}
+
+fn default_dongtan_workers() -> usize {
+    2
 }
 
 fn default_max_workers() -> usize {

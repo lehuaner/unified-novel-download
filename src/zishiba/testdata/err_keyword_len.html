@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>信息提示</title>
+<link href="https://www.zishiba.com/e/message/style.css" rel="stylesheet" type="text/css">
+<SCRIPT language=javascript>
+var secs=3;//3秒
+for(i=1;i<=secs;i++) 
+{ window.setTimeout("update(" + i + ")", i * 1000);} 
+function update(num) 
+{ 
+if(num == secs) 
+{ history.go(-1); } 
+else 
+{ } 
+}
+</SCRIPT>
+</head>
+<body>
+ 
+<div class="cd-popup" role="alert">
+	<div class="cd-popup-container">
+	    <h3>提示信息</h3>
+		<p>系统限制的搜索关键字只能在 2~20 个字符之间</p>
+		<ul class="cd-buttons">
+			<li><a href="/">主页</a></li>
+			<li><a href="javascript:history.go(-1)">返回</a></li>
+		</ul>
+		<a href="javascript:history.go(-1)" class="cd-popup-close img-replace">关闭</a>
+	</div> <!-- cd-popup-container -->
+</div> <!-- cd-popup -->
+</body>
+</html>

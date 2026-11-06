@@ -843,27 +843,28 @@ fn search_books(cfg: &Config, query: &str) -> Result<Vec<SearchItem>> {
         }
     }
 
-    // 书旗
-    #[cfg(feature = "shuqi")]
-    {
-        let shuqi = crate::shuqi::ShuqiClient::new(timeout_secs)
-            .and_then(|client| crate::shuqi::search_items(&client, keyword, 1));
-        match shuqi {
+    // 免费平台聚合搜索：遍历注册表，逐源首页搜索。
+    // 资源站（姿势吧/笔下文学）不再是独立平台，只在晋江聚合层中参与，
+    // 因此这里跳过它们，避免在 TUI 搜索结果里露出资源站。
+    for provider in crate::provider::providers() {
+        if matches!(
+            provider.id(),
+            "zishiba" | "hen0" | "guanshuya" | "biqubee" | "biquga" | "dongtan"
+        ) {
+            continue;
+        }
+        let opts = crate::provider::SearchOptions::new(keyword, 1, timeout_secs);
+        match provider.search(&opts) {
             Ok((items, _has_more)) => raw_items.extend(items),
-            Err(err) => errors.push(format!("书旗搜索失败: {err}")),
+            Err(err) => errors.push(format!("{}搜索失败: {err}", provider.display_name())),
         }
     }
 
-    // 七猫
-    #[cfg(feature = "qimao")]
-    {
-        let qimao = crate::qimao::QimaoClient::new(timeout_secs)
-            .and_then(|client| crate::qimao::search_items(&client, keyword, 1, None, None));
-        match qimao {
-            Ok((items, _has_more)) => raw_items.extend(items),
-            Err(err) => errors.push(format!("七猫搜索失败: {err}")),
-        }
-    }
+    // 晋江：官方源 + 平台池（资源站）聚合判定。
+    let jinjiang =
+        crate::aggregate::search("jinjiang", keyword, 1, timeout_secs, &raw_items, None, None);
+    raw_items.extend(jinjiang.items);
+    errors.extend(jinjiang.warnings);
 
     let mut results: Vec<SearchItem> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
