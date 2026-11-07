@@ -3,6 +3,12 @@
 本文件记录 Unified Novel Downloader 的用户可见变更。
 发布流程：推送 `v*` tag 后由 GitHub Actions（`.github/workflows/build-rust.yml`）自动构建多平台产物并创建 Release。
 
+## v2.7.4 — 2026-11-07
+
+### 修复
+
+- **预览关闭会删掉正在下载的书封面，导致导出的 EPUB 没有封面**：`/api/preview/{book_id}/cleanup` 原来只按「目录里没有 `status.json` 且只有封面图」判定预览残留。下载刚启动时目录正好是这个状态（封面由下载计划写入，`status.json` 要等章节落盘才生成），预览弹窗关闭触发的清理会把封面连同目录一起删掉，最终 EPUB 只能无封面导出。现在清理前先检查该书是否还有排队/下载中的任务，有则跳过、保留封面。
+
 ## v2.7.3 — 2026-11-06
 
 ### 修复

@@ -1010,6 +1010,19 @@ impl JobStore {
             .count()
     }
 
+    /// 该书是否还有排队/下载中的任务。
+    ///
+    /// 预览清理用它判断“目录里的封面是不是刚被下载计划写入的”：
+    /// 下载启动到第一章落盘之间没有 status.json，只凭目录内容会把封面连同目录一起删掉，
+    /// 最终生成的 EPUB 就没有封面（预览弹窗关闭时会触发这种竞态）。
+    pub(crate) fn has_active_for_book(&self, book_id: &str) -> bool {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        g.values().any(|e| {
+            e.info.book_id == book_id
+                && matches!(e.info.state, JobState::Queued | JobState::Running)
+        })
+    }
+
     pub(crate) fn set_running(&self, id: u64) {
         self.update(id, |j| {
             j.state = JobState::Running;
@@ -1202,4 +1215,31 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod job_store_tests {
+    use super::*;
+
+    #[test]
+    fn has_active_for_book_tracks_queued_and_running_only() {
+        let store = JobStore::default();
+        assert!(!store.has_active_for_book("bx:1"), "空任务表不应命中");
+
+        let other = store.create("bx:2".to_string(), None);
+        store.set_running(other.id);
+        assert!(!store.has_active_for_book("bx:1"), "其他书的任务不应命中");
+
+        let handle = store.create("bx:1".to_string(), None);
+        assert!(store.has_active_for_book("bx:1"), "排队中的任务应命中");
+
+        store.set_running(handle.id);
+        assert!(store.has_active_for_book("bx:1"), "下载中的任务应命中");
+
+        store.set_done(handle.id);
+        assert!(!store.has_active_for_book("bx:1"), "已完成的任务不应命中");
+
+        store.set_failed(other.id, "boom".to_string());
+        assert!(!store.has_active_for_book("bx:2"), "失败的任务不应命中");
+    }
 }

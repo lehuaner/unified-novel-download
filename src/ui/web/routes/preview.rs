@@ -550,6 +550,13 @@ pub(crate) async fn api_preview_cleanup(
         return StatusCode::NO_CONTENT;
     }
 
+    // 正在下载的书：封面由下载计划刚写入，此时还没有 status.json，
+    // 若按“仅含封面”删除，下载完成后生成的 EPUB 会没有封面。
+    if state.jobs.has_active_for_book(&book_id) {
+        debug!(book_id = %book_id, "cleanup: 该书正在下载，保留预览补出的封面");
+        return StatusCode::NO_CONTENT;
+    }
+
     // 需要获取 book_name 以定位文件夹，调用 prepare_download_plan 一次
     let cfg_for_plan = cfg.clone();
     let bid = book_id.clone();
